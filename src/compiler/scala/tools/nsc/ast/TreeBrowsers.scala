@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala
@@ -11,26 +18,25 @@ import scala.language.implicitConversions
 
 import java.awt.{List => _, _}
 import java.awt.event._
-import java.io.StringWriter
-
+import java.io.{StringWriter, Writer}
 import javax.swing._
 import javax.swing.event.TreeModelListener
 import javax.swing.tree._
 
-import scala.concurrent.Lock
-import scala.text._
+import java.util.concurrent.CountDownLatch
+import scala.annotation.tailrec
 
 /**
  * Tree browsers can show the AST in a graphical and interactive
  * way, useful for debugging and understanding.
  *
  * @author Iulian Dragos
- * @version 1.0
  */
 abstract class TreeBrowsers {
   val global: Global
   import global._
   import nme.EMPTY
+  import TreeBrowsers._
 
   val borderSize = 10
 
@@ -55,20 +61,16 @@ abstract class TreeBrowsers {
 
     /** print the whole program */
     def browse(pName: String, units: List[CompilationUnit]): Unit = {
-      var unitList: List[UnitTree] = Nil
-
-      for (i <- units)
-        unitList = UnitTree(i) :: unitList
-      val tm = new ASTTreeModel(ProgramTree(unitList))
-
-      val frame = new BrowserFrame(pName)
-      frame.setTreeModel(tm)
-
-      val lock = new Lock()
-      frame.createFrame(lock)
-
+      val latch = new CountDownLatch(1)
+      SwingUtilities.invokeAndWait {() =>
+        val unitList = units.map(UnitTree(_))
+        val tm = new ASTTreeModel(ProgramTree(unitList))
+        val frame = new BrowserFrame(pName)
+        frame.setTreeModel(tm)
+        frame.createFrame(latch)
+      }
       // wait for the frame to be closed
-      lock.acquire()
+      latch.await()
     }
   }
 
@@ -118,7 +120,6 @@ abstract class TreeBrowsers {
    * displaying information
    *
    * @author Iulian Dragos
-   * @version 1.0
    */
   class BrowserFrame(phaseName: String = "unknown") {
     try {
@@ -162,20 +163,19 @@ abstract class TreeBrowsers {
 
     /** Create a frame that displays the AST.
      *
-     * @param lock The lock is used in order to stop the compilation thread
+     * @param latch The latch is used in order to stop the compilation thread
      * until the user is done with the tree inspection. Swing creates its
      * own threads when the frame is packed, and therefore execution
      * would continue. However, this is not what we want, as the tree and
      * especially symbols/types would change while the window is visible.
      */
-    def createFrame(lock: Lock): Unit = {
-      lock.acquire() // keep the lock until the user closes the window
+    def createFrame(latch: CountDownLatch): Unit = {
 
       frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE)
 
       frame.addWindowListener(new WindowAdapter() {
         /** Release the lock, so compilation may resume after the window is closed. */
-        override def windowClosed(e: WindowEvent): Unit = lock.release()
+        override def windowClosed(e: WindowEvent): Unit = latch.countDown()
       })
 
       jTree = new JTree(treeModel) {
@@ -213,6 +213,7 @@ abstract class TreeBrowsers {
       frame.getContentPane().add(splitPane)
       frame.pack()
       frame.setVisible(true)
+      splitPane.setDividerLocation(0.5)
     }
 
     class ASTMenuBar extends JMenuBar {
@@ -236,7 +237,7 @@ abstract class TreeBrowsers {
       val jmiCancel = new JMenuItem (
         new AbstractAction("Cancel Compilation") {
           putValue(Action.ACCELERATOR_KEY, KeyStroke.getKeyStroke(KeyEvent.VK_Q, menuKey + shiftKey, false))
-          override def actionPerformed(e: ActionEvent) {
+          override def actionPerformed(e: ActionEvent): Unit = {
             closeWindow()
             global.currentRun.cancel()
           }
@@ -257,7 +258,7 @@ abstract class TreeBrowsers {
       val jmiExpand = new JMenuItem(
         new AbstractAction("Expand All Nodes") {
           putValue(Action.ACCELERATOR_KEY, KeyStroke.getKeyStroke(KeyEvent.VK_E, menuKey, false))
-          override def actionPerformed(e: ActionEvent) {
+          override def actionPerformed(e: ActionEvent): Unit = {
             expandAll(jTree)
           }
         }
@@ -266,7 +267,7 @@ abstract class TreeBrowsers {
       val jmiCollapse = new JMenuItem(
         new AbstractAction("Collapse All Nodes") {
           putValue(Action.ACCELERATOR_KEY, KeyStroke.getKeyStroke(KeyEvent.VK_L, menuKey, false))
-          override def actionPerformed(e: ActionEvent) {
+          override def actionPerformed(e: ActionEvent): Unit = {
             collapseAll(jTree)
           }
         }
@@ -298,6 +299,7 @@ abstract class TreeBrowsers {
         case _ =>
           str.append("tree.id: ").append(t.id)
           str.append("\ntree.pos: ").append(t.pos)
+          str.append(TreeInfo.attachments(t, "tree"))
           str.append("\nSymbol: ").append(TreeInfo.symbolText(t))
           str.append("\nSymbol owner: ").append(
             if ((t.symbol ne null) && t.symbol != NoSymbol)
@@ -516,12 +518,23 @@ abstract class TreeBrowsers {
       val s = t.symbol
 
       if ((s ne null) && (s != NoSymbol)) {
-        var str = s.flagString
-        if (s.isStaticMember) str = str + " isStatic "
-        (str + " annotations: " + s.annotations.mkString("", " ", "")
-          + (if (s.isTypeSkolem) "\ndeSkolemized annotations: " + s.deSkolemize.annotations.mkString("", " ", "") else ""))
+        val str = new StringBuilder(s.flagString)
+        if (s.isStaticMember) str ++= " isStatic "
+        str ++= " annotations: "
+        str ++= s.annotations.mkString("", " ", "")
+        if (s.isTypeSkolem) {
+          str ++= "\ndeSkolemized annotations: "
+          str ++= s.deSkolemize.annotations.mkString("", " ", "")
+        }
+        str ++= attachments(s, "")
+        str.toString
       }
       else ""
+    }
+
+    def attachments(t: Attachable, pre: String): String = {
+      if (t.attachments.isEmpty) ""
+      else t.attachments.all.mkString(s"\n$pre attachments:\n   ","\n   ","")
     }
   }
 
@@ -643,8 +656,118 @@ abstract class TreeBrowsers {
                         toDocument(thistpe) :/: ", " :/:
                         toDocument(supertpe) ::")"))
       case _ =>
-        sys.error("Unknown case: " + t.toString +", "+ t.getClass)
+        abort("Unknown case: " + t.toString +", "+ t.getClass)
     }
+  }
+
+}
+
+object TreeBrowsers {
+  case object DocNil extends Document
+  case object DocBreak extends Document
+  case class DocText(txt: String) extends Document
+  case class DocGroup(doc: Document) extends Document
+  case class DocNest(indent: Int, doc: Document) extends Document
+  case class DocCons(hd: Document, tl: Document) extends Document
+
+  /**
+    * A basic pretty-printing library, based on Lindig's strict version
+    * of Wadler's adaptation of Hughes' pretty-printer.
+    *
+    * @author Michel Schinz
+    */
+  abstract class Document {
+    def ::(hd: Document): Document = DocCons(hd, this)
+    def ::(hd: String): Document = DocCons(DocText(hd), this)
+    def :/:(hd: Document): Document = hd :: DocBreak :: this
+    def :/:(hd: String): Document = hd :: DocBreak :: this
+
+    /**
+      * Format this document on `writer` and try to set line
+      * breaks so that the result fits in `width` columns.
+      */
+    def format(width: Int, writer: Writer): Unit = {
+      type FmtState = (Int, Boolean, Document)
+
+      @tailrec
+      def fits(w: Int, state: List[FmtState]): Boolean = state match {
+        case _ if w < 0 =>
+          false
+        case List() =>
+          true
+        case (_, _, DocNil) :: z =>
+          fits(w, z)
+        case (i, b, DocCons(h, t)) :: z =>
+          fits(w, (i,b,h) :: (i,b,t) :: z)
+        case (_, _, DocText(t)) :: z =>
+          fits(w - t.length(), z)
+        case (i, b, DocNest(ii, d)) :: z =>
+          fits(w, (i + ii, b, d) :: z)
+        case (_, false, DocBreak) :: z =>
+          fits(w - 1, z)
+        case (_, true, DocBreak) :: z =>
+          true
+        case (i, _, DocGroup(d)) :: z =>
+          fits(w, (i, false, d) :: z)
+      }
+
+      def spaces(n: Int): Unit = {
+        var rem = n
+        while (rem >= 16) { writer write "                "; rem -= 16 }
+        if (rem >= 8)     { writer write "        "; rem -= 8 }
+        if (rem >= 4)     { writer write "    "; rem -= 4 }
+        if (rem >= 2)     { writer write "  "; rem -= 2}
+        if (rem == 1)     { writer write " " }
+      }
+
+      @tailrec
+      def fmt(k: Int, state: List[FmtState]): Unit = state match {
+        case List() => ()
+        case (_, _, DocNil) :: z =>
+          fmt(k, z)
+        case (i, b, DocCons(h, t)) :: z =>
+          fmt(k, (i, b, h) :: (i, b, t) :: z)
+        case (i, _, DocText(t)) :: z =>
+          writer write t
+          fmt(k + t.length(), z)
+        case (i, b, DocNest(ii, d)) :: z =>
+          fmt(k, (i + ii, b, d) :: z)
+        case (i, true, DocBreak) :: z =>
+          writer write "\n"
+          spaces(i)
+          fmt(i, z)
+        case (i, false, DocBreak) :: z =>
+          writer write " "
+          fmt(k + 1, z)
+        case (i, b, DocGroup(d)) :: z =>
+          val fitsFlat = fits(width - k, (i, false, d) :: z)
+          fmt(k, (i, !fitsFlat, d) :: z)
+        case _ =>
+          ()
+      }
+
+      fmt(0, (0, false, DocGroup(this)) :: Nil)
+    }
+  }
+
+  object Document {
+    /** The empty document */
+    def empty = DocNil
+
+    /** A break, which will either be turned into a space or a line break */
+    def break = DocBreak
+
+    /** A document consisting of some text literal */
+    def text(s: String): Document = DocText(s)
+
+    /**
+      * A group, whose components will either be printed with all breaks
+      * rendered as spaces, or with all breaks rendered as line breaks.
+      */
+    def group(d: Document): Document = DocGroup(d)
+
+    /** A nested document, which will be indented as specified. */
+    def nest(i: Int, d: Document): Document = DocNest(i, d)
   }
 
 }

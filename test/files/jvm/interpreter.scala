@@ -1,16 +1,17 @@
 import scala.tools.nsc._
+import scala.tools.nsc.interpreter.shell.ReplReporterImpl
 import scala.tools.partest.ReplTest
 
 object Test extends ReplTest {
   override def extraSettings = "-deprecation"
-  def code = <code>
+  def code = """
 // basics
 3+4
-def gcd(x: Int, y: Int): Int = {{
+def gcd(x: Int, y: Int): Int = {
           if (x == 0) y
           else if (y == 0) x
           else gcd(y%x, x)
-}}
+}
 val five = gcd(15,35)
 var x = 1
 x = 2
@@ -24,8 +25,6 @@ println("hello")
 
 // ticket #1513
 val t1513 = Array(null)
-// ambiguous toString problem from #547
-val atom = new scala.xml.Atom(())
 // overriding toString problem from #1404
 class S(override val toString : String)
 val fish = new S("fish")
@@ -108,13 +107,6 @@ def x => y => z
 [1,2,3]
 
 
-// multi-line XML
-&lt;a>
-&lt;b
-  c="c"
-  d="dd"
-/>&lt;/a>
-
 
 /*
   /*
@@ -124,11 +116,10 @@ def x => y => z
 
 
 // multi-line string
-"""
+"""+ "\"\"\""+ """
 hello
 there
-"""
-
+"""+ "\"\"\""+ """
 (1 +   // give up early by typing two blank lines
 
 
@@ -138,16 +129,16 @@ val x = `match`
 
 // multiple classes defined on one line
 sealed class Exp; class Fact extends Exp; class Term extends Exp
-def f(e: Exp) = e match {{  // non-exhaustive warning here
+def f(e: Exp) = e match {  // non-exhaustive warning here
   case _:Fact => 3
-}}
+}
 
-</code>.text
+"""
 
   def appendix() = {
     val settings = new Settings
     settings.classpath.value = sys.props("java.class.path")
-    val interp = new interpreter.IMain(settings)
+    val interp = new interpreter.IMain(settings, new ReplReporterImpl(settings))
     interp.interpret("def plusOne(x: Int) = x + 1")
     interp.interpret("plusOne(5)")
     interp.reset()
@@ -155,5 +146,8 @@ def f(e: Exp) = e match {{  // non-exhaustive warning here
     interp.interpret("plusOne(5) // should be undefined now")
   }
 
-  appendix()
+  override def main(args: Array[String]): Unit = {
+    super.main(args)
+    appendix()
+  }
 }

@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -36,25 +43,29 @@ abstract class BrowsingLoaders extends GlobalSymbolLoaders {
     if (existing == NoSymbol) {
       decls enter member
       member
-    } else if (existing.sourceFile == null) {
-      decls unlink existing
-      decls enter member
-      member
     } else {
-      if (member.sourceFile != null) {
-        if (existing.sourceFile != member.sourceFile)
-          error(member+"is defined twice,"+
-                "\n in "+existing.sourceFile+
-                "\n and also in "+member.sourceFile)
+      val existingSourceFile = existing.sourceFile
+      if (existingSourceFile == null) {
+        decls unlink existing
+        decls enter member
+        member
+      } else {
+        val memberSourceFile = member.sourceFile
+        if (memberSourceFile != null) {
+          if (existingSourceFile != memberSourceFile)
+            error(""+member+"is defined twice,"+
+              "\n in "+existingSourceFile+
+              "\n and also in "+memberSourceFile)
+        }
+        existing
       }
-      existing
     }
   }
 
   /** Browse the top-level of given abstract file `src` and enter
-   *  eny encountered top-level classes and modules in `root`
+   *  any encountered top-level classes and modules in `root`
    */
-  def browseTopLevel(root: Symbol, src: AbstractFile) {
+  def browseTopLevel(root: Symbol, src: AbstractFile): Unit = {
 
     class BrowserTraverser extends Traverser {
       var packagePrefix = ""
@@ -113,7 +124,7 @@ abstract class BrowsingLoaders extends GlobalSymbolLoaders {
 
   /** Enter top-level symbols from a source file
    */
-  override def enterToplevelsFromSource(root: Symbol, name: String, src: AbstractFile) {
+  override def enterToplevelsFromSource(root: Symbol, name: String, src: AbstractFile): Unit = {
     try {
       if (root.isEffectiveRoot || !src.name.endsWith(".scala")) // RootClass or EmptyPackageClass
         super.enterToplevelsFromSource(root, name, src)

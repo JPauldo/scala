@@ -1,3 +1,15 @@
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
+
 package scala.tools.nsc.doc
 package model
 package diagram
@@ -77,8 +89,8 @@ trait DiagramDirectiveParser {
       defaultFilter
   }
 
-  protected var tFilter = 0l
-  protected var tModel = 0l
+  protected var tFilter = 0L
+  protected var tModel = 0L
 
   /** Show the entire diagram, no filtering */
   case object FullDiagram extends DiagramFilter {

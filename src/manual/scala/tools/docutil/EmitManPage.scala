@@ -18,12 +18,12 @@ object EmitManPage {
   def escape(text: String) =
     text.replaceAll("-", "\\-")
 
-  def emitSection(section: Section, depth: Int) {
-    def emitPara(text: AbstractText) {
+  def emitSection(section: Section, depth: Int): Unit = {
+    def emitPara(text: AbstractText): Unit = {
       emitText(text)
       out println "\n.IP"
     }
-    def emitText(text: AbstractText) {
+    def emitText(text: AbstractText): Unit = {
       text match {
         case seq:SeqText =>
           seq.components foreach emitText
@@ -83,7 +83,7 @@ object EmitManPage {
       }
     }
 
-    def emitParagraph(para: Paragraph) {
+    def emitParagraph(para: Paragraph): Unit = {
       para match {
         case TextParagraph(text) =>
           out println ".PP"
@@ -144,7 +144,7 @@ object EmitManPage {
     section.paragraphs foreach emitParagraph
   }
 
-  def emitDocument(doc: Document) {
+  def emitDocument(doc: Document): Unit = {
     out println ".\\\" ##########################################################################"
     out println ".\\\" #                      __                                                #"
     out println ".\\\" #      ________ ___   / /  ___     Scala 2 On-line Manual Pages          #"
@@ -169,19 +169,19 @@ object EmitManPage {
     case _                          => sys.exit(1)
   }
 
-  def emitManPage(classname: String, outStream: java.io.OutputStream = out.out) {
-    if(outStream != out.out) out setOut outStream
-    try {
-      val cl = this.getClass.getClassLoader()
-      val clasz = cl loadClass classname
-      val meth = clasz getDeclaredMethod "manpage"
-      val doc = meth.invoke(null).asInstanceOf[Document]
-      emitDocument(doc)
-    } catch {
-      case ex: Exception =>
-        ex.printStackTrace()
-        System.err println "Error in EmitManPage"
-        sys.exit(1)
+  def emitManPage(classname: String, outStream: java.io.OutputStream = out.out): Unit =
+    Console.withOut(outStream) {
+      try {
+        val cl = this.getClass.getClassLoader()
+        val clasz = cl loadClass classname
+        val meth = clasz getDeclaredMethod "manpage"
+        val doc = meth.invoke(null).asInstanceOf[Document]
+        emitDocument(doc)
+      } catch {
+        case ex: Exception =>
+          ex.printStackTrace()
+          System.err println "Error in EmitManPage"
+          sys.exit(1)
+      }
     }
-  }
 }

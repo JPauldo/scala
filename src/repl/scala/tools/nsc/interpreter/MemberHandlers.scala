@@ -1,10 +1,16 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
-package scala.tools.nsc
-package interpreter
+package scala.tools.nsc.interpreter
 
 import scala.language.implicitConversions
 
@@ -13,9 +19,14 @@ import scala.collection.mutable
 trait MemberHandlers {
   val intp: IMain
 
+  // show identity hashcode of objects in vals
+  final val showObjIds = false
+
   import intp.{ Request, global, naming }
   import global._
   import naming._
+
+  import ReplStrings.{string2codeQuoted, string2code, any2stringOf}
 
   private def codegenln(leadingPlus: Boolean, xs: String*): String = codegen(leadingPlus, (xs ++ Array("\n")): _*)
   private def codegenln(xs: String*): String = codegenln(true, xs: _*)
@@ -67,7 +78,7 @@ trait MemberHandlers {
     case member: ClassDef                      => new ClassHandler(member)
     case member: TypeDef                       => new TypeAliasHandler(member)
     case member: Assign                        => new AssignHandler(member)
-    case member: Import                        => new ImportHandler(member)
+    case member: Import                        => new ImportHandler(member.duplicate) // duplicate because the same tree will be type checked (which loses info)
     case DocDef(_, documented)                 => chooseHandler(documented)
     case member                                => new GenericHandler(member)
   }
@@ -103,26 +114,14 @@ trait MemberHandlers {
     def definedNames    = definesTerm.toList ++ definesType.toList
     def definedSymbols  = List[Symbol]()
 
-    def extraCodeToEvaluate(req: Request): String = ""
     def resultExtractionCode(req: Request): String = ""
 
-    private def shortName = this.getClass.toString split '.' last
+    private def shortName = this.getClass.toString.split('.').last
     override def toString = shortName + referencedNames.mkString(" (refs: ", ", ", ")")
   }
 
   class GenericHandler(member: Tree) extends MemberHandler(member)
 
-  import scala.io.AnsiColor.{ BOLD, BLUE, GREEN, RESET }
-
-  def color(c: String, s: String) =
-    if (replProps.colorOk) string2code(BOLD) + string2code(c) + s + string2code(RESET)
-    else s
-
-  def colorName(s: String) =
-    color(BLUE, string2code(s))
-
-  def colorType(s: String) =
-    color(GREEN, string2code(s))
 
   class ValHandler(member: ValDef) extends MemberDefHandler(member) {
     val maxStringElements = 1000  // no need to mkString billions of elements
@@ -137,12 +136,8 @@ trait MemberHandlers {
           if (mods.isLazy) codegenln(false, "<lazy>")
           else any2stringOf(path, maxStringElements)
 
-        val vidString =
-          if (replProps.vids) s"""" + f"@$${System.identityHashCode($path)}%8x" + """"
-          else ""
-
-        val nameString = colorName(prettyName) + vidString
-        val typeString = colorType(req typeOf name)
+        val nameString = string2code(prettyName) + (if (showObjIds) s"""" + f"@$${System.identityHashCode($path)}%8x" + """" else "")
+        val typeString = string2code(req typeOf name)
         s""" + "$nameString: $typeString = " + $resultString"""
       }
     }
@@ -151,8 +146,8 @@ trait MemberHandlers {
   class DefHandler(member: DefDef) extends MemberDefHandler(member) {
     override def definesValue = flattensToEmpty(member.vparamss) // true if 0-arity
     override def resultExtractionCode(req: Request) = {
-      val nameString = colorName(name)
-      val typeString = colorType(req typeOf name)
+      val nameString = string2code(name)
+      val typeString = string2code(req typeOf name)
       if (mods.isPublic) s""" + "$nameString: $typeString\\n"""" else ""
     }
   }
@@ -171,20 +166,8 @@ trait MemberHandlers {
   }
 
   class AssignHandler(member: Assign) extends MemberHandler(member) {
-    val Assign(lhs, rhs) = member
-    override lazy val name = newTermName(freshInternalVarName())
-
-    override def definesTerm = Some(name)
-    override def definesValue = true
-    override def extraCodeToEvaluate(req: Request) =
-      """val %s = %s""".format(name, lhs)
-
-    /** Print out lhs instead of the generated varName */
-    override def resultExtractionCode(req: Request) = {
-      val lhsType = string2code(req lookupTypeOf name)
-      val res     = string2code(req fullPath name)
-      """ + "%s: %s = " + %s + "\n" """.format(string2code(lhs.toString), lhsType, res) + "\n"
-    }
+    override def resultExtractionCode(req: Request) =
+      codegenln(s"mutated ${member.lhs}")
   }
 
   class ModuleHandler(module: ModuleDef) extends MemberDefHandler(module) {
@@ -228,16 +211,20 @@ trait MemberHandlers {
       importableMembers(exitingTyper(targetType)).filterNot(isFlattenedSymbol).toList
 
     // non-wildcard imports
-    private def individualSelectors = selectors filter analyzer.isIndividualImport
+    private def individualSelectors = selectors.filter(_.isSpecific)
 
     /** Whether this import includes a wildcard import */
-    val importsWildcard = selectors exists analyzer.isWildcardImport
+    val importsWildcard = selectors.exists(_.isWildcard)
 
     def implicitSymbols = importedSymbols filter (_.isImplicit)
     def importedSymbols = individualSymbols ++ wildcardSymbols
 
     lazy val importableSymbolsWithRenames = {
-      val selectorRenameMap = individualSelectors.flatMap(x => x.name.bothNames zip x.rename.bothNames).toMap
+      val selectorRenameMap: mutable.HashMap[Name, Name] = mutable.HashMap.empty[Name, Name]
+      individualSelectors foreach { x =>
+        selectorRenameMap.put(x.name.toTermName, x.rename.toTermName)
+        selectorRenameMap.put(x.name.toTypeName, x.rename.toTypeName)
+      }
       importableTargetMembers flatMap (m => selectorRenameMap.get(m.name) map (m -> _))
     }
 
@@ -250,7 +237,7 @@ trait MemberHandlers {
 
     /** The names imported by this statement */
     override lazy val importedNames: List[Name] = wildcardNames ++ individualNames
-    lazy val importsSymbolNamed: Set[String] = importedNames map (_.toString) toSet
+    lazy val importsSymbolNamed: Set[String] = importedNames.map(_.toString).toSet
 
     def importString = imp.toString
     override def resultExtractionCode(req: Request) = codegenln(importString) + "\n"

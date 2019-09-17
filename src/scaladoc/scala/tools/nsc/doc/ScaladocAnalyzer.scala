@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2007-2013 LAMP/EPFL
- * @author  Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -8,9 +15,8 @@ package doc
 
 import scala.tools.nsc.ast.parser.{ SyntaxAnalyzer, BracePatch }
 import typechecker.Analyzer
-import scala.reflect.internal.Chars._
 import scala.reflect.internal.util.{ BatchSourceFile, Position }
-import scala.tools.nsc.doc.base.{ CommentFactoryBase, MemberLookupBase, LinkTo, LinkToExternal }
+import scala.tools.nsc.doc.base.{ CommentFactoryBase, MemberLookupBase, LinkTo }
 
 trait ScaladocAnalyzer extends Analyzer {
   val global : Global // generally, a ScaladocGlobal
@@ -19,7 +25,6 @@ trait ScaladocAnalyzer extends Analyzer {
   override def newTyper(context: Context): ScaladocTyper = new Typer(context) with ScaladocTyper
 
   trait ScaladocTyper extends Typer {
-    private def unit = context.unit
 
     override def canAdaptConstantTypeToLiteral = false
 
@@ -43,7 +48,7 @@ trait ScaladocAnalyzer extends Analyzer {
             case _ =>
           }
           for (useCaseSym <- useCase.defined) {
-            if (sym.name != useCaseSym.name)
+            if (sym.getterName != useCaseSym.getterName)
               reporter.warning(useCase.pos, "@usecase " + useCaseSym.name.decode + " does not match commented symbol: " + sym.name.decode)
           }
         }
@@ -136,7 +141,7 @@ abstract class ScaladocSyntaxAnalyzer[G <: Global](val global: G) extends Syntax
       override def internalLink(sym: Symbol, site: Symbol): Option[LinkTo] = None
       override def chooseLink(links: List[LinkTo]): LinkTo = links.headOption.orNull
       override def toString(link: LinkTo): String = "No link"
-      override def findExternalLink(sym: Symbol, name: String): Option[LinkToExternal] = None
+      override def findExternalLink(sym: Symbol, name: String): Option[LinkTo] = None
       override def warnNoLink: Boolean = false
     }
 

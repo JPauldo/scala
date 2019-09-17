@@ -1,7 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2007-2013 LAMP/EPFL
- * @author Manohar Jonnalagedda
- * @author Gilles Dubochet
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -342,6 +348,11 @@ trait Object extends MemberTemplateEntity {
   def kind = "object"
 }
 
+/** An annotation template. Any class which extends `scala.annotation.Annotation` */
+trait AnnotationClass extends Class {
+  override def kind = "annotation"
+}
+
 /** A package template. A package is in the universe if it is declared as a package object, or if it
   * contains at least one template. */
 trait Package extends DocTemplateEntity {
@@ -515,7 +526,7 @@ trait ImplicitConversion {
  *     in this case, it won't be possible to call the member directly, the type checker will fail attempting to adapt
  *     the call arguments (or if they fit it will call the original class method)
  *  2) shadowing from other possible implicit conversions ()
- *     this will result in an ambiguous implicit converion error
+ *     this will result in an ambiguous implicit conversion error
  */
 trait ImplicitMemberShadowing {
   /** The members that shadow the current entry use .inTemplate to get to the template name */
@@ -526,8 +537,8 @@ trait ImplicitMemberShadowing {
       assert(ambiguatingMembers.foreach(_.byConversion.isDefined) */
   def ambiguatingMembers: List[MemberEntity]
 
-  def isShadowed: Boolean = !shadowingMembers.isEmpty
-  def isAmbiguous: Boolean = !ambiguatingMembers.isEmpty
+  def isShadowed: Boolean = shadowingMembers.nonEmpty
+  def isAmbiguous: Boolean = ambiguatingMembers.nonEmpty
 }
 
 /** A trait that encapsulates a constraint necessary for implicit conversion */

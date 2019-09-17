@@ -166,6 +166,7 @@ abstract class RangeTest(kind: String) extends Properties("Range "+kind) {
         override def zero = 0
 
         def fromInt(x: Int): Int = ???
+        def parseString(str: String) = ???
         def minus(x: Int, y: Int): Int = ???
         def negate(x: Int): Int = ???
         def times(x: Int, y: Int): Int = ???
@@ -229,6 +230,14 @@ abstract class RangeTest(kind: String) extends Properties("Range "+kind) {
     }
   }
 
+  property("tails") = forAll(myGen) { r =>
+    (r.size < 1024) ==> { r.tails.toList == r.toList.tails.toList }
+  }
+
+  property("inits") = forAll(myGen) { r =>
+    (r.size < 1024) ==> { r.inits.toList == r.toList.inits.toList }
+  }
+
   property("reverse.toSet.equal") = forAll(myGen) { r =>
 //    println("reverse.toSet.equal "+str(r))
     val reversed = r.reverse
@@ -241,6 +250,13 @@ abstract class RangeTest(kind: String) extends Properties("Range "+kind) {
       println(reversed.toSet)
     }
     aresame :| str(r)
+  }
+
+  property("grouped") = forAllNoShrink(
+    myGen,
+    Gen.posNum[Int],
+  ) { (r, size) =>
+    r.grouped(size).toSeq == r.toList.grouped(size).toSeq
   }
 }
 

@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala
@@ -9,10 +16,10 @@ package io
 
 import scala.language.implicitConversions
 
-import java.io.{ RandomAccessFile, File => JFile }
-import java.net.{ URI, URL }
+import java.io.{RandomAccessFile, File => JFile}
+import java.net.{URI, URL}
+import scala.annotation.tailrec
 import scala.util.Random.alphanumeric
-import scala.reflect.internal.util.Statistics
 
 /** An abstraction for filesystem paths.  The differences between
  *  Path, File, and Directory are primarily to communicate intent.
@@ -25,22 +32,15 @@ import scala.reflect.internal.util.Statistics
  *  Also available are createFile and createDirectory, which attempt
  *  to create the path in question.
  *
- *  @author  Paul Phillips
- *  @since   2.8
- *
  *  ''Note:  This library is considered experimental and should not be used unless you know what you are doing.''
  */
 object Path {
   def isExtensionJarOrZip(jfile: JFile): Boolean = isExtensionJarOrZip(jfile.getName)
   def isExtensionJarOrZip(name: String): Boolean = {
-    val ext = extension(name)
-    ext == "jar" || ext == "zip"
+    name.endsWith(".jar") || name.endsWith(".zip")
   }
   def extension(name: String): String = {
-    var i = name.length - 1
-    while (i >= 0 && name.charAt(i) != '.')
-      i -= 1
-
+    val i = name.lastIndexOf('.')
     if (i < 0) ""
     else name.substring(i + 1).toLowerCase
   }
@@ -58,12 +58,12 @@ object Path {
   def apply(path: String): Path = apply(new JFile(path))
   def apply(jfile: JFile): Path = try {
     def isFile = {
-      if (Statistics.canEnable) Statistics.incCounter(IOStats.fileIsFileCount)
+      //if (StatisticsStatics.areSomeColdStatsEnabled) Statistics.incCounter(IOStats.fileIsFileCount)
       jfile.isFile
     }
 
     def isDirectory = {
-      if (Statistics.canEnable) Statistics.incCounter(IOStats.fileIsDirectoryCount)
+      //if (StatisticsStatics.areSomeColdStatsEnabled) Statistics.incCounter(IOStats.fileIsDirectoryCount)
       jfile.isDirectory
     }
 
@@ -133,6 +133,7 @@ class Path private[io] (val jfile: JFile) {
   def relativize(other: Path) = {
     assert(isAbsolute == other.isAbsolute, "Paths not of same type: "+this+", "+other)
 
+    @tailrec
     def createRelativePath(baseSegs: List[String], otherSegs: List[String]) : String = {
       (baseSegs, otherSegs) match {
         case (b :: bs, o :: os) if b == o => createRelativePath(bs, os)
@@ -199,16 +200,16 @@ class Path private[io] (val jfile: JFile) {
   def canRead = jfile.canRead()
   def canWrite = jfile.canWrite()
   def exists = {
-    if (Statistics.canEnable) Statistics.incCounter(IOStats.fileExistsCount)
+    //if (StatisticsStatics.areSomeColdStatsEnabled) Statistics.incCounter(IOStats.fileExistsCount)
     try jfile.exists() catch { case ex: SecurityException => false }
   }
 
   def isFile = {
-    if (Statistics.canEnable) Statistics.incCounter(IOStats.fileIsFileCount)
+    //if (StatisticsStatics.areSomeColdStatsEnabled) Statistics.incCounter(IOStats.fileIsFileCount)
     try jfile.isFile() catch { case ex: SecurityException => false }
   }
   def isDirectory = {
-    if (Statistics.canEnable) Statistics.incCounter(IOStats.fileIsDirectoryCount)
+    //if (StatisticsStatics.areSomeColdStatsEnabled) Statistics.incCounter(IOStats.fileIsDirectoryCount)
     try jfile.isDirectory() catch { case ex: SecurityException => jfile.getPath == "." }
   }
   def isAbsolute = jfile.isAbsolute()

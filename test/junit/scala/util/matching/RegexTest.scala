@@ -6,7 +6,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
-import scala.tools.testing.AssertUtil._
+import scala.tools.testkit.AssertUtil._
 
 @RunWith(classOf[JUnit4])
 class RegexTest {
@@ -14,9 +14,7 @@ class RegexTest {
     val full = """.*: (.)$""".r
     val text = "   When I use this operator: *"
     // Testing 2.10.x compatibility of the return types of unapplySeq
-    val x :: Nil = full.unapplySeq(text: Any).get
     val y :: Nil = full.unapplySeq(text: CharSequence).get
-    assertEquals("*", x)
     assertEquals("*", y)
   }
 
@@ -24,30 +22,11 @@ class RegexTest {
     val R = """(\d)""".r
     val matchh = R.findFirstMatchIn("a1").get
     // Testing 2.10.x compatibility of the return types of unapplySeq
-    val x :: Nil = R.unapplySeq(matchh: Any).get
     val y :: Nil = R.unapplySeq(matchh).get
-    assertEquals("1", x)
     assertEquals("1", y)
   }
 
-  @Test def t8787nullMatch() = {
-    val r = """\d+""".r
-    val s: String = null
-    val x = s match { case r() => 1 ; case _ => 2 }
-    assertEquals(2, x)
-  }
-
-  @Test def t8787nullMatcher() = {
-    val r = """(\d+):(\d+)""".r
-    val s = "1:2 3:4 5:6"
-    val z = ((r findAllMatchIn s).toList :+ null) flatMap {
-      case r(x, y) => Some((x.toInt, y.toInt))
-      case _       => None
-    }
-    assertEquals(List((1,2),(3,4),(5,6)), z)
-  }
-
-  @Test def `SI-9666: use inline group names`(): Unit = {
+  @Test def `t9666: use inline group names`(): Unit = {
     val r = new Regex("a(?<Bee>b*)c")
     val ms = r findAllIn "stuff abbbc more abc and so on"
     assertTrue(ms.hasNext)
@@ -59,7 +38,7 @@ class RegexTest {
     assertFalse(ms.hasNext)
   }
 
-  @Test def `SI-9666: use explicit group names`(): Unit = {
+  @Test def `t9666: use explicit group names`(): Unit = {
     val r = new Regex("a(b*)c", "Bee")
     val ms = r findAllIn "stuff abbbc more abc and so on"
     assertTrue(ms.hasNext)
@@ -71,7 +50,7 @@ class RegexTest {
     assertFalse(ms.hasNext)
   }
 
-  @Test def `SI-9666: fall back to explicit group names`(): Unit = {
+  @Test def `t9666: fall back to explicit group names`(): Unit = {
     val r = new Regex("a(?<Bar>b*)c", "Bee")
     val ms = r findAllIn "stuff abbbc more abc and so on"
     assertTrue(ms.hasNext)
@@ -89,7 +68,7 @@ class RegexTest {
   type NoMatch = NoSuchElementException
   type NoData  = IllegalStateException
 
-  @Test def `SI-9666: throw on bad name`(): Unit = {
+  @Test def `t9666: throw on bad name`(): Unit = {
     assertThrows[NoGroup] {
       val r = new Regex("a(?<Bar>b*)c")
       val ms = r findAllIn "stuff abbbc more abc and so on"
@@ -110,7 +89,7 @@ class RegexTest {
     }
   }
 
-  @Test def `SI-9827 MatchIterator ergonomics`(): Unit = {
+  @Test def `t9827 MatchIterator ergonomics`(): Unit = {
     val r = "(ab)(cd)".r
     val s = "xxxabcdyyyabcdzzz"
     assertEquals(3, r.findAllIn(s).start)
@@ -175,5 +154,23 @@ class RegexTest {
       assertEquals("bbbbbb", bes)
       assertEquals("aaaaa", aes)
     }
+  }
+
+  @Test def `t10827 matches method`(): Unit = {
+    val r = """\d+""".r
+    assertTrue(r.matches("500"))
+    assertFalse(r.matches("foo"))
+    assertFalse(r.matches("123 123"))
+    assertFalse(r.matches("foo2"))
+    assertFalse(r.matches("2foo"))
+  }
+
+  @Test def `t10827 matches method for unanchored Regex`(): Unit = {
+    val r = """\d+""".r.unanchored
+    assertTrue(r.matches("500"))
+    assertFalse(r.matches("abc"))
+    assertTrue(r.matches("123 123"))
+    assertTrue(r.matches("foo2"))
+    assertTrue(r.matches("2foo"))
   }
 }

@@ -1,8 +1,8 @@
-// SI-4560 (and SI-4601): Reflection caches are expected in the wrong classfiles
+// scala/bug#4560 (and scala/bug#4601): Reflection caches are expected in the wrong classfiles
 // with various differing constellations of self-types. This leads to runtime exceptions
 // when the reflection caches are accessed. This tests both reflection cache accesses
-// for structural type method invocations (`y.f()`) (SI-4560) and accesses to symbols which are
-// handled similarly (SI-4601)
+// for structural type method invocations (`y.f()`) (scala/bug#4560) and accesses to symbols which are
+// handled similarly (scala/bug#4601)
 
 // TEST 1
 // self-type is other trait
@@ -56,11 +56,11 @@ trait B3 {
 }
 
 object Test3 extends B3 {
-  def test { fail() }
+  def test: Unit = { fail() }
 }
 
 object Test {
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
     Test1.fail()
     Test2.fail()
     Test3.fail()

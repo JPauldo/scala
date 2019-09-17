@@ -1,10 +1,14 @@
-/*                     __                                               *\
-**     ________ ___   / /  ___     Scala API                            **
-**    / __/ __// _ | / /  / _ |    (c) 2003-2013, LAMP/EPFL             **
-**  __\ \/ /__/ __ |/ /__/ __ |    http://scala-lang.org/               **
-** /____/\___/_/ |_/____/_/ | |                                         **
-**                          |/                                          **
-\*                                                                      */
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
 
 package scala
 package io
@@ -21,8 +25,8 @@ import scala.language.implicitConversions
 // XML: optional encoding parameter.
 //   <?xml version="1.0" encoding="ISO8859-1" ?>
 //
-// MacRoman vs. UTF-8: see http://osdir.com/ml/lang-jruby-devel/2009-04/msg00071.html
-// -Dfile.encoding: see http://bugs.java.com/bugdatabase/view_bug.do?bug_id=4375816
+// MacRoman vs. UTF-8: see https://groups.google.com/d/msg/jruby-developers/-qtwRhoE1WM/whSPVpTNV28J
+// -Dfile.encoding: see https://bugs.java.com/view_bug.do?bug_id=4375816
 
 /** A class for character encoding/decoding preferences.
  *
@@ -85,9 +89,9 @@ object Codec extends LowPriorityCodecImplicits {
    *  the fact that you can influence anything at all via -Dfile.encoding
    *  as an accident, with any anomalies considered "not a bug".
    */
-  def defaultCharsetCodec = apply(Charset.defaultCharset)
-  def fileEncodingCodec   = apply(scala.util.Properties.encodingString)
-  def default             = defaultCharsetCodec
+  def defaultCharsetCodec: Codec = apply(Charset.defaultCharset)
+  def fileEncodingCodec: Codec = apply(scala.util.Properties.encodingString)
+  def default: Codec = defaultCharsetCodec
 
   def apply(encoding: String): Codec        = new Codec(Charset forName encoding)
   def apply(charSet: Charset): Codec        = new Codec(charSet)

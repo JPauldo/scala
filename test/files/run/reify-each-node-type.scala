@@ -45,10 +45,10 @@ object s {
     act(reify { val x: Int = 0                              /* ValDef */ })
     act(reify { val x = 0                                   /* TypeTree */ })
     act(reify { if (true) ()                                /* If */ })
-    act(reify { def f { }                                   /* DefDef */ })
+    act(reify { def f: Unit = { }                                   /* DefDef */ })
     act(reify { def m = super.q                             /* Super */ })
     act(reify { trait A                                     /* ClassDef Template */ })
-    act(reify { def f(x: Any) { }                           /* EmptyTree */ })
+    act(reify { def f(x: Any): Unit = { }                           /* EmptyTree */ })
     act(reify { null: D with E                              /* CompoundTypeTree */ })
     act(reify { type T = Int                                /* TypeDef */ })
     act(reify { type CC[T <: D] = C[T]                      /* TypeBoundsTree */ })
@@ -84,7 +84,7 @@ object s {
 
     // act(reify { List[OuterP[Int]#InnerP[Byte]]() })
     //
-    // SI-7243
+    // scala/bug#7243
     //
     // test/files/run/reify-each-node-type.scala:85: error: Cannot materialize r.List.apply[r.OuterP[Int]#InnerP[Byte]]() as { ... } because:
     // scala.reflect.macros.TypecheckException: value TypeTreeWithDeferredRefCheck is not a member of type parameter U

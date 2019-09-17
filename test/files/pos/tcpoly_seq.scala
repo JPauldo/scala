@@ -60,7 +60,7 @@ trait HOSeq {
      *
      *  @param x  the element to append.
      */
-    def += (x: A) {
+    def += (x: A): Unit = {
       if (exported) copy
       if (start.isEmpty) {
         last = new HOSeq.this.:: (x, Nil)
@@ -81,13 +81,13 @@ trait HOSeq {
 
     /** Clears the buffer contents.
      */
-    def clear {
+    def clear: Unit = {
       start = Nil
       exported = false
     }
 
     /** Copy contents of this buffer */
-    private def copy {
+    private def copy: Unit = {
       var cursor = start
       val limit = last.tail
       clear
@@ -153,8 +153,8 @@ trait HOSeq {
     Subseq <: Seq[T]
 
 
-    def map[K](f: T=>K): MapResult[K]
-    def filter(f: T=>Boolean): FilterResult
+    def map[K](f: T => K): MapResult[K]
+    def filter(f: T => Boolean): FilterResult
     def subseq(from: Int, to: Int): Subseq
     def flatMap[S <: Seq[K], K](f: T => S): S#Concat  // legal?
     def concat(others: Seq[T]): Concat

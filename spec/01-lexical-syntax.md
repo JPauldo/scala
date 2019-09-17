@@ -23,7 +23,7 @@ hexDigit      ::= ‘0’ | … | ‘9’ | ‘A’ | … | ‘F’ | ‘a’ | 
 ```
 
 <!--
-TODO SI-4583: UnicodeEscape used to allow additional backslashes,
+TODO scala/bug#4583: UnicodeEscape used to allow additional backslashes,
 and there is something in the code `evenSlashPrefix` that alludes to it,
 but I can't make it work nor can I imagine how this would make sense,
 so I removed it for now.
@@ -34,9 +34,8 @@ classes (Unicode general category given in parentheses):
 
 1. Whitespace characters. `\u0020 | \u0009 | \u000D | \u000A`.
 1. Letters, which include lower case letters (`Ll`), upper case letters (`Lu`),
-   titlecase letters (`Lt`), other letters (`Lo`), letter numerals (`Nl`) and the
-   two characters `\u0024 ‘$’` and `\u005F ‘_’`, which both count as upper case
-   letters.
+   titlecase letters (`Lt`), other letters (`Lo`), modifier letters (`Ml`), 
+   letter numerals (`Nl`) and the two characters `\u0024 ‘$’` and `\u005F ‘_’`.
 1. Digits `‘0’ | … | ‘9’`.
 1. Parentheses `‘(’ | ‘)’ | ‘[’ | ‘]’ | ‘{’ | ‘}’ `.
 1. Delimiter characters ``‘`’ | ‘'’ | ‘"’ | ‘.’ | ‘;’ | ‘,’ ``.
@@ -78,9 +77,33 @@ big_bob++=`def`
 ```
 
 decomposes into the three identifiers `big_bob`, `++=`, and
-`def`. The rules for pattern matching further distinguish between
-_variable identifiers_, which start with a lower case letter, and
-_constant identifiers_, which do not.
+`def`.
+
+The rules for pattern matching further distinguish between
+_variable identifiers_, which start with a lower case letter
+or `_`, and _constant identifiers_, which do not.
+
+For this purpose, lower case letter don't only include a-z,
+but also all characters in Unicode category Ll (lowercase letter),
+as well as all letters that have contributory property
+Other_Lowercase, except characters in category Nl (letter numerals)
+which are never taken as lower case.
+
+The following are examples of variable identifiers:
+
+> ```scala
+>     x         maxIndex   p2p   empty_?
+>     `yield`   αρετη      _y    dot_product_*
+>     __system  _MAX_LEN_
+>     ªpple     ʰelper
+> ```
+
+Some examples of constant identifiers are
+
+> ```scala
+>     +    Object  $reserved  ǅul    ǂnûm
+>     ⅰ_ⅲ  Ⅰ_Ⅲ     ↁelerious  ǃqhàà  ʹthatsaletter
+> ```
 
 The ‘\$’ character is reserved for compiler-synthesized identifiers.
 User programs should not define identifiers which contain ‘\$’ characters.
@@ -314,6 +337,7 @@ Literal  ::=  [‘-’] integerLiteral
            |  booleanLiteral
            |  characterLiteral
            |  stringLiteral
+           |  interpolatedString
            |  symbolLiteral
            |  ‘null’
 ```
@@ -329,13 +353,15 @@ digit           ::=  ‘0’ | nonZeroDigit
 nonZeroDigit    ::=  ‘1’ | … | ‘9’
 ```
 
-Integer literals are usually of type `Int`, or of type
-`Long` when followed by a `L` or
-`l` suffix. Values of type `Int` are all integer
+Values of type `Int` are all integer
 numbers between $-2\^{31}$ and $2\^{31}-1$, inclusive.  Values of
 type `Long` are all integer numbers between $-2\^{63}$ and
 $2\^{63}-1$, inclusive. A compile-time error occurs if an integer literal
 denotes a number outside these ranges.
+
+Integer literals are usually of type `Int`, or of type
+`Long` when followed by a `L` or `l` suffix.
+(Lowercase `l` is deprecated for reasons of legibility.)
 
 However, if the expected type [_pt_](06-expressions.html#expression-typing) of a literal
 in an expression is either `Byte`, `Short`, or `Char`
@@ -349,8 +375,11 @@ is _pt_. The numeric ranges given by these types are:
 |`Short`         | $-2\^{15}$ to $2\^{15}-1$|
 |`Char`          | $0$ to $2\^{16}-1$       |
 
+The digits of a numeric literal may be separated by
+arbitrarily many underscores for purposes of legibility.
+
 > ```scala
-> 0          21          0xFFFFFFFF       -42L
+> 0           21_000      0x7F        -42L        0xFFFF_FFFF
 > ```
 
 ### Floating Point Literals
@@ -490,10 +519,55 @@ of the escape sequences [here](#escape-sequences) are interpreted.
 > ```
 >
 > Method `stripMargin` is defined in class
-> [scala.collection.immutable.StringLike](http://www.scala-lang.org/api/current/#scala.collection.immutable.StringLike).
-> Because there is a predefined
-> [implicit conversion](06-expressions.html#implicit-conversions) from `String` to
-> `StringLike`, the method is applicable to all strings.
+> [scala.collection.StringOps](https://www.scala-lang.org/api/current/scala/collection/StringOps.html#stripMargin:String).
+
+#### Interpolated string
+
+```ebnf
+interpolatedString ::= alphaid ‘"’ {printableChar \ (‘"’ | ‘\$’) | escape} ‘"’ 
+                         |  alphaid ‘"""’ {[‘"’] [‘"’] char \ (‘"’ | ‘\$’) | escape} {‘"’} ‘"""’
+escape                 ::= ‘\$\$’ 
+                         | ‘\$’ id
+                         | ‘\$’ BlockExpr
+alphaid                ::= upper idrest
+                         |  varid
+
+```
+
+Interpolated string consist of an identifier starting with a letter immediately 
+followed by a string literal. There may be no whitespace characters or comments 
+between the leading identifier and the opening quote ‘”’ of the string. 
+The string literal in a interpolated string can be standard (single quote) 
+or multi-line (triple quote).
+
+Inside a interpolated string none of the usual escape characters are interpreted 
+(except for unicode escapes) no matter whether the string literal is normal 
+(enclosed in single quotes) or multi-line (enclosed in triple quotes). 
+Instead, there is are two new forms of dollar sign escape. 
+The most general form encloses an expression in \${ and }, i.e. \${expr}. 
+The expression enclosed in the braces that follow the leading \$ character is of 
+syntactical category BlockExpr. Hence, it can contain multiple statements, 
+and newlines are significant. Single ‘\$’-signs are not permitted in isolation 
+in a interpolated string. A single ‘\$’-sign can still be obtained by doubling the ‘\$’ 
+character: ‘\$\$’.
+
+The simpler form consists of a ‘\$’-sign followed by an identifier starting with 
+a letter and followed only by letters, digits, and underscore characters, 
+e.g \$id. The simpler form is expanded by putting braces around the identifier, 
+e.g \$id is equivalent to \${id}. In the following, unless we explicitly state otherwise, 
+we assume that this expansion has already been performed.
+
+The expanded expression is type checked normally. Usually, StringContext will resolve to 
+the default implementation in the scala package, 
+but it could also be user-defined. Note that new interpolators can also be added through 
+implicit conversion of the built-in scala.StringContext.
+
+One could write an extension
+```scala
+implicit class StringInterpolation(s: StringContext) {
+  def id(args: Any*) = ???
+}
+```
 
 ### Escape Sequences
 
@@ -510,10 +584,6 @@ The following escape sequences are recognized in character and string literals.
 | `‘\‘ ‘'‘`     | `\u0027` | single quote    |  `'`   |
 | `‘\‘ ‘\‘`     | `\u005c` | backslash       |  `\`   |
 
-A character with Unicode between 0 and 255 may also be represented by
-an octal escape, i.e. a backslash `'\'` followed by a
-sequence of up to three octal characters.
-
 It is a compile time error if a backslash character in a character or
 string literal does not start a valid escape sequence.
 
@@ -523,9 +593,9 @@ string literal does not start a valid escape sequence.
 symbolLiteral  ::=  ‘'’ plainid
 ```
 
-A symbol literal `'x` is a shorthand for the expression
-`scala.Symbol("x")`. `Symbol` is a [case class](05-classes-and-objects.html#case-classes),
-which is defined as follows.
+A symbol literal `'x` is a shorthand for the expression `scala.Symbol("x")` and
+is of the [literal type](03-types#literal-types) `'x`. `Symbol` is a [case
+class](05-classes-and-objects.html#case-classes), which is defined as follows.
 
 ```scala
 package scala
@@ -552,6 +622,20 @@ A multi-line comment is a sequence of characters between
 but are required to be properly nested.  Therefore, a comment like
 `/* /* */` will be rejected as having an unterminated
 comment.
+
+## Trailing Commas in Multi-line Expressions
+
+If a comma (`,`) is followed immediately, ignoring whitespace, by a newline and
+a closing parenthesis (`)`), bracket (`]`), or brace (`}`), then the comma is
+treated as a "trailing comma" and is ignored. For example:
+
+```scala
+foo(
+  23,
+  "bar",
+  true,
+)
+```
 
 ## XML mode
 

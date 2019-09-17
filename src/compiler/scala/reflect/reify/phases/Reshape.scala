@@ -1,6 +1,19 @@
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
+
 package scala.reflect.reify
 package phases
 
+import scala.annotation.tailrec
 import scala.tools.nsc.symtab.Flags._
 
 trait Reshape {
@@ -22,7 +35,7 @@ trait Reshape {
    *    * Transforming Modifiers.annotations into Symbol.annotations
    *    * Transforming Annotated annotations into AnnotatedType annotations
    *    * Transforming Annotated(annot, expr) into Typed(expr, TypeTree(Annotated(annot, _))
-   *    * Non-idempotencies of the typechecker: https://issues.scala-lang.org/browse/SI-5464
+   *    * Non-idempotencies of the typechecker: https://github.com/scala/bug/issues/5464
    */
   val reshape = new Transformer {
     var currentSymbol: Symbol = NoSymbol
@@ -126,7 +139,7 @@ trait Reshape {
      *
      *  Why will it fail? Because reified deftrees (e.g. ClassDef(...)) will generate fresh symbols during that compilation,
      *  so naively reified symbols will become out of sync, which brings really funny compilation errors and/or crashes, e.g.:
-     *  https://issues.scala-lang.org/browse/SI-5230
+     *  https://github.com/scala/bug/issues/5230
      *
      *  To deal with this unpleasant fact, we need to fall back from types to equivalent trees (after all, parser trees don't contain any types, just trees, so it should be possible).
      *  Luckily, these original trees get preserved for us in the `original` field when Trees get transformed into TypeTrees.
@@ -177,6 +190,7 @@ trait Reshape {
       CompoundTypeTree(Template(parents1, self, stats1))
     }
 
+    @tailrec
     private def toPreTyperTypedOrAnnotated(tree: Tree): Tree = tree match {
       case ty @ Typed(expr1, tpt) =>
         if (reifyDebug) println("reify typed: " + tree)
@@ -185,6 +199,7 @@ trait Reshape {
           case tpt => tpt
         }
         val annotatedArg = {
+          @tailrec
           def loop(tree: Tree): Tree = tree match {
             case annotated1 @ Annotated(ann, annotated2 @ Annotated(_, _)) => loop(annotated2)
             case annotated1 @ Annotated(ann, arg) => arg
@@ -227,26 +242,12 @@ trait Reshape {
           case NestedAnnotArg(ann)    => toPreTyperAnnotation(ann)
         }
 
-        ann.assocs map { case (nme, arg) => AssignOrNamedArg(Ident(nme), toScalaAnnotation(arg)) }
+        ann.assocs map { case (nme, arg) => NamedArg(Ident(nme), toScalaAnnotation(arg)) }
       }
 
       def extractOriginal: PartialFunction[Tree, Tree] = { case Apply(Select(New(tpt), _), _) => tpt }
-      assert(extractOriginal.isDefinedAt(ann.original), showRaw(ann.original))
+      assert(extractOriginal.isDefinedAt(ann.original), s"$ann has unexpected original ${showRaw(ann.original)}" )
       New(TypeTree(ann.atp) setOriginal extractOriginal(ann.original), List(args))
-    }
-
-    private def toPreTyperLazyVal(ddef: DefDef): ValDef = {
-      def extractRhs(rhs: Tree) = rhs match {
-        case Block(Assign(lhs, rhs)::Nil, _) if lhs.symbol.isLazy => rhs
-        case _ => rhs // unit or trait case
-      }
-      val DefDef(mods0, name0, _, _, tpt0, rhs0) = ddef
-      val name1 = name0.dropLocal
-      val Modifiers(flags0, privateWithin0, annotations0) = mods0
-      val flags1 = (flags0 & GetterFlags) & ~(STABLE | ACCESSOR | METHOD)
-      val mods1 = Modifiers(flags1, privateWithin0, annotations0) setPositions mods0.positions
-      val mods2 = toPreTyperModifiers(mods1, ddef.symbol)
-      ValDef(mods2, name1, tpt0, extractRhs(rhs0))
     }
 
     private def trimAccessors(deff: Tree, stats: List[Tree]): List[Tree] = {
@@ -280,7 +281,10 @@ trait Reshape {
             var flags1 = flags & ~LOCAL
             if (!ddef.symbol.isPrivate) flags1 = flags1 & ~PRIVATE
             val privateWithin1 = ddef.mods.privateWithin
-            val annotations1 = accessors(vdef).foldLeft(annotations)((curr, acc) => curr ++ (acc.symbol.annotations map toPreTyperAnnotation))
+            val annotations1 =
+              accessors(vdef).foldLeft(annotations){ (curr, acc) =>
+                curr ++ (acc.symbol.annotations.filterNot(_ == UnmappableAnnotation ).map(toPreTyperAnnotation))
+              }
             Modifiers(flags1, privateWithin1, annotations1) setPositions mods.positions
           } else {
             mods

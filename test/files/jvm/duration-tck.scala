@@ -130,7 +130,7 @@ object Test extends App {
 
 
   // test overflow protection
-  for (unit ← Seq(DAYS, HOURS, MINUTES, SECONDS, MILLISECONDS, MICROSECONDS, NANOSECONDS)) {
+  for (unit <- Seq(DAYS, HOURS, MINUTES, SECONDS, MILLISECONDS, MICROSECONDS, NANOSECONDS)) {
     val x = unit.convert(Long.MaxValue, NANOSECONDS)
     val dur = Duration(x, unit)
     val mdur = Duration(-x, unit)
@@ -151,7 +151,7 @@ object Test extends App {
     intercept[IllegalArgumentException] { mdur / 0.9 }
     intercept[IllegalArgumentException] { dur / 0.4 }
     intercept[IllegalArgumentException] { mdur / 0.4 }
-    Duration(x + unit.toString.toLowerCase)
+    Duration(x.toString + unit.toString.toLowerCase)
     Duration("-" + x + unit.toString.toLowerCase)
     intercept[IllegalArgumentException] { Duration("%.0f".format(x + 10000000d) + unit.toString.toLowerCase) }
     intercept[IllegalArgumentException] { Duration("-%.0f".format(x + 10000000d) + unit.toString.toLowerCase) }
@@ -202,4 +202,12 @@ object Test extends App {
   ((2 seconds fromNow).timeLeft: FiniteDuration) < 4.seconds mustBe true
   val finite3: FiniteDuration = 3.5 seconds span
 
+  // scala/bug#9949
+  Duration(-1.0, DAYS) mustBe Duration(-1, DAYS)
+  Duration("-10 s").toNanos mustBe -10000000000L
+  Duration(1.0, DAYS) mustBe Duration(1, DAYS)
+  Duration("10 s").toNanos mustBe 10000000000L
+  
+  // scala/bug#10320
+  Duration("6803536004516701ns").toNanos mustBe 6803536004516701L
 }

@@ -11,12 +11,11 @@ import org.openjdk.jol.info.{GraphPathRecord, GraphVisitor, GraphWalker}
 class OpenHashMapTest {
   /** Test that an [[OpenHashMap]] correctly maintains its internal `deleted` count. */
   @Test
-  def maintainsDeletedCount {
+  def maintainsDeletedCount: Unit = {
     val m = OpenHashMap.empty[Int, Int]
 
     // Reflect to get the private `deleted` field's value, which should be zero.
-
-    /* TODO Doesn't work, due to SI-9306.
+    // Was broken, see scala/bug#9306.
     import scala.reflect.runtime.{universe => ru}
 
     val mirror = ru.runtimeMirror(m.getClass.getClassLoader)
@@ -27,7 +26,7 @@ class OpenHashMapTest {
       .head.asTerm
 
     val fieldMirror = mirror.reflect(m).reflectField(termSym)
-		*/
+
     // Use Java reflection instead for now.
     val field =
       try {  // Name may or not be mangled, depending on what the compiler authors are doing.
@@ -43,13 +42,13 @@ class OpenHashMapTest {
     assertEquals(1, field.getInt(m))
 
     m.put(0, 0)  // Add an entry with the same key
-    // TODO assertEquals(0, fieldMirror.get.asInstanceOf[Int])
+    assertEquals(0, fieldMirror.get.asInstanceOf[Int])
     assertEquals(0, field.getInt(m))
   }
 
-  /** Test that an [[OpenHashMap]] frees references to a deleted key (SI-9522). */
+  /** Test that an [[OpenHashMap]] frees references to a deleted key (scala/bug#9522). */
   @Test
-  def freesDeletedKey {
+  def freesDeletedKey: Unit = {
     import scala.language.reflectiveCalls
 
     class MyClass {
@@ -67,7 +66,7 @@ class OpenHashMapTest {
         instanceCount
       }
 
-      override def visit(record: GraphPathRecord) {
+      override def visit(record: GraphPathRecord): Unit = {
         if (record.klass() == classOf[MyClass])  instanceCount += 1
       }
     }

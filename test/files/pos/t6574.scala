@@ -1,15 +1,28 @@
 class Bad[X, Y](val v: Int) extends AnyVal {
   def vv = v
-  @annotation.tailrec final def foo[Z](a: Int)(b: String) {
+  @annotation.tailrec final def foo[Z](a: Int)(b: String): Unit = {
     this.foo[Z](a)(b)
   }
 
-  @annotation.tailrec final def differentReceiver {
+  @annotation.tailrec final def differentReceiver: Unit = {
     {(); new Bad[X, Y](0)}.differentReceiver
   }
 
-  @annotation.tailrec final def dependent[Z](a: Int)(b: String): b.type = {
+  // The original test case fails with the new is/asInstanceOf semantics
+  // introduced along with along with SIP-23 implementation because the method has a
+  // singleton result type which cannot be erased correctly.
+  // See: neg/sip23-tailrec-singleton.scala
+  //@annotation.tailrec final def dependent[Z](a: Int)(b: String): b.type = {
+  //  this.dependent[Z](a)(b)
+  //}
+
+  // Replacement test case
+  @annotation.tailrec final def dependent[Z](a: Int)(b: String): Option[b.type] = {
     this.dependent[Z](a)(b)
+  }
+
+  @annotation.tailrec final def differentTypeArgs: Unit = {
+    {(); new Bad[String, Unit](0)}.differentTypeArgs
   }
 }
 

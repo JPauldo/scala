@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -32,14 +39,14 @@ abstract class Flatten extends InfoTransform {
     if (old.nonEmpty) debuglog(s"In scope of ${sym.owner}, unlinked $old_s")
   }
 
-  private def liftClass(sym: Symbol) {
+  private def liftClass(sym: Symbol): Unit = {
     if (!sym.isLifted) {
       sym setFlag LIFTED
       debuglog("re-enter " + sym.fullLocationString)
       replaceSymbolInCurrentScope(sym)
     }
   }
-  private def liftSymbol(sym: Symbol) {
+  private def liftSymbol(sym: Symbol): Unit = {
     liftClass(sym)
   }
   // This is a short-term measure partially working around objects being
@@ -57,8 +64,9 @@ abstract class Flatten extends InfoTransform {
   private val flattened = new TypeMap {
     def apply(tp: Type): Type = tp match {
       case TypeRef(pre, sym, args) if isFlattenablePrefix(pre) =>
-        assert(args.isEmpty && sym.enclosingTopLevelClass != NoSymbol, sym.ownerChain)
-        typeRef(sym.enclosingTopLevelClass.owner.thisType, sym, Nil)
+        val top = sym.enclosingTopLevelClass
+        assert(args.isEmpty && top != NoSymbol, sym.ownerChain)
+        typeRef(top.owner.thisType, sym, Nil)
       case ClassInfoType(parents, decls, clazz) =>
         var parents1 = parents
         val decls1 = scopeTransform(clazz) {
@@ -78,7 +86,7 @@ abstract class Flatten extends InfoTransform {
                   // In theory, we could assert(sym.isMethod), because nested, non-static modules are
                   // transformed to methods (METHOD flag added in UnCurry). But this requires
                   // forcing sym.info (see comment on isModuleNotMethod), which forces stub symbols
-                  // too eagerly (SI-8907).
+                  // too eagerly (scala/bug#8907).
 
                   // Note that module classes are not entered into the 'decls' of the ClassInfoType
                   // of the outer class, only the module symbols are. So the current loop does
@@ -118,15 +126,15 @@ abstract class Flatten extends InfoTransform {
       tree match {
         case PackageDef(_, _) =>
           liftedDefs(tree.symbol.moduleClass) = new ListBuffer
-          super.transform(tree)
+          tree.transform(this)
         case Template(_, _, _) if tree.symbol.isDefinedInPackage =>
           liftedDefs(tree.symbol.owner) = new ListBuffer
-          super.transform(tree)
+          tree.transform(this)
         case ClassDef(_, _, _, _) if tree.symbol.isNestedClass =>
-          // SI-5508 Ordering important. In `object O { trait A { trait B } }`, we want `B` to appear after `A` in
+          // scala/bug#5508 Ordering important. In `object O { trait A { trait B } }`, we want `B` to appear after `A` in
           //         the sequence of lifted trees in the enclosing package. Why does this matter? Currently, mixin
           //         needs to transform `A` first to a chance to create accessors for private[this] trait fields
-          //         *before* it transforms inner classes that refer to them. This also fixes SI-6231.
+          //         *before* it transforms inner classes that refer to them. This also fixes scala/bug#6231.
           //
           //         Alternative solutions
           //            - create the private[this] accessors eagerly in Namer (but would this cover private[this] fields
@@ -134,12 +142,12 @@ abstract class Flatten extends InfoTransform {
           //            - move the accessor creation to the Mixin info transformer
           val liftedBuffer = liftedDefs(tree.symbol.enclosingTopLevelClass.owner)
           val index = liftedBuffer.length
-          liftedBuffer.insert(index, super.transform(tree))
+          liftedBuffer.insert(index, tree.transform(this))
           if (tree.symbol.sourceModule.isStaticModule)
             removeSymbolInCurrentScope(tree.symbol.sourceModule)
           EmptyTree
         case _ =>
-          super.transform(tree)
+          tree.transform(this)
       }
     }
 

@@ -1,17 +1,17 @@
 object Test {
   def bar(s: String) = s;
   val o: Option[Null] = None
-  def nullReference {
+  def nullReference: Unit = {
     val a: Null = o.get
     bar(a) // Was: VerifyError under GenICode
   }
 
-  def literal {
+  def literal: Unit = {
     val a: Null = null
     bar(a)
   }
 
-  /** Check SI-8330 for details */
+  /** Check scala/bug#8330 for details */
   def expectedUnitInABranch(b: Boolean): Boolean = {
     if (b) {
       val x = 12

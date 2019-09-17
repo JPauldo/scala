@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala
@@ -12,39 +19,71 @@ import java.lang.ArithmeticException
 /** This class ...
  *
  *  @author Martin Odersky
- *  @version 1.0
  */
 abstract class ConstantFolder {
 
   val global: Global
   import global._
 
+  // We can fold side effect free terms and their types
+  object FoldableTerm {
+    def unapply(tree: Tree): Option[Constant] = tree match {
+      case Literal(x) => Some(x)
+      case term if term.symbol != null && !term.symbol.isLazy && (term.symbol.isVal || (term.symbol.isGetter && term.symbol.accessed.isVal)) =>
+        extractConstant(term.tpe)
+      case _ => None
+    }
+  }
+
+  // We can fold the types of side effecting terms, but not the terms themselves
+  object ConstantTerm {
+    def unapply(tree: Tree): Option[Constant] = extractConstant(tree.tpe)
+  }
+
+  private def extractConstant(tpe: Type): Option[Constant] =
+    tpe match {
+      case ConstantType(x) => Some(x)
+      case st: SingleType =>
+        st.underlying match {
+          case ConstantType(x) => Some(x)
+          case _ => None
+        }
+      case _ => None
+    }
+
   /** If tree is a constant operation, replace with result. */
-  def apply(tree: Tree): Tree = fold(tree, tree match {
-    case Apply(Select(Literal(x), op), List(Literal(y))) => foldBinop(op, x, y)
-    case Select(Literal(x), op) => foldUnop(op, x)
-    case _ => null
-  })
-
-  /** If tree is a constant value that can be converted to type `pt`, perform
-   *  the conversion.
-   */
-  def apply(tree: Tree, pt: Type): Tree = fold(apply(tree), tree.tpe match {
-    case ConstantType(x) => x convertTo pt
-    case _ => null
-  })
-
-  private def fold(tree: Tree, compX: => Constant): Tree =
+  def apply(tree: Tree): Tree = {
     try {
-      val x = compX
-      if ((x ne null) && x.tag != UnitTag) tree setType ConstantType(x)
-      else tree
+      tree match {
+        case Apply(Select(FoldableTerm(x), op), List(FoldableTerm(y))) => fold(tree, foldBinop(op, x, y), true)
+        case Apply(Select(ConstantTerm(x), op), List(ConstantTerm(y))) => fold(tree, foldBinop(op, x, y), false)
+        case Select(FoldableTerm(x), op) => fold(tree, foldUnop(op, x), true)
+        case Select(ConstantTerm(x), op) => fold(tree, foldUnop(op, x), false)
+        case _ => tree
+      }
     } catch {
       case e: ArithmeticException =>
         if (settings.warnConstant)
           warning(tree.pos, s"Evaluation of a constant expression results in an arithmetic error: ${e.getMessage}")
         tree
     }
+  }
+
+  /** If tree is a constant value that can be converted to type `pt`, perform
+   *  the conversion.
+   */
+  def apply(tree: Tree, pt: Type): Tree = {
+    val orig = apply(tree)
+    orig.tpe match {
+      case tp@ConstantType(x) => fold(orig, x convertTo pt, isConstantType(tp))
+      case _ => orig
+    }
+  }
+
+  private def fold(orig: Tree, folded: Constant, foldable: Boolean): Tree =
+    if ((folded eq null) || folded.tag == UnitTag) orig
+    else if(foldable) orig setType FoldableConstantType(folded)
+    else orig setType LiteralType(folded)
 
   private def foldUnop(op: Name, x: Constant): Constant = (op, x.tag) match {
     case (nme.UNARY_!, BooleanTag) => Constant(!x.booleanValue)

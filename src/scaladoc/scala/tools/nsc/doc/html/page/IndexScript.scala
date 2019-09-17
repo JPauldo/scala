@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2007-2016 LAMP/EPFL
- * @author  David Bernard, Manohar Jonnalagedda, Felix Mulder
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc.doc
@@ -18,10 +25,8 @@ class IndexScript(universe: doc.Universe) extends Page {
 
   def path = List("index.js")
 
-  override def writeFor(site: HtmlFactory) {
-    writeFile(site) {
-      _.write(s"Index.PACKAGES = $packages;")
-    }
+  override def writeFor(site: HtmlFactory): Unit = writeFile(site) {
+    _.write(s"Index.PACKAGES = $packages;")
   }
 
   val packages = {
@@ -80,14 +85,14 @@ class IndexScript(universe: doc.Universe) extends Page {
   def allPackagesWithTemplates: Map[Package, List[DocTemplateEntity]] = {
     Map(allPackages.map((key) => {
       key -> key.templates.collect {
-        case t: DocTemplateEntity if !t.isPackage && !universe.settings.hardcoded.isExcluded(t.qualifiedName) => t
+        case t: DocTemplateEntity if !t.isPackage => t
       }
     }) : _*)
   }
 
   /** Gets the short description i.e. the first sentence of the docstring */
   def shortDesc(mbr: MemberEntity): String = mbr.comment.fold("") { c =>
-    inlineToStr(c.short).replaceAll("\n", "")
+    Page.inlineToStr(c.short).replaceAll("\n", "")
   }
 
   /** Returns the json representation of the supplied members */

@@ -1,8 +1,8 @@
 
 scala> :type List[1, 2, 3]
-<console>:1: error: identifier expected but integer literal found.
-       List[1, 2, 3]
-            ^
+           ^
+       error: wrong number of type parameters for method apply: [A](elems: A*)List[A] in trait IterableFactory
+
 
 scala> :type List(1, 2, 3)
 List[Int]
@@ -34,12 +34,16 @@ scala> :type lazy val f = 5
 Int
 
 scala> :type protected lazy val f = 5
-<console>:5: error: lazy value f cannot be accessed in object $iw
- Access to protected lazy value f not permitted because
- enclosing object $eval in package $line13 is not a subclass of
- object $iw where target is defined
-         lazy val $result = f
+
+         lazy val $result = $line16.$read.$iw.$iw.f
                                                   ^
+<synthetic>:4: error: lazy value f cannot be accessed in object $iw
+        Access to protected lazy value f not permitted because
+        enclosing object $eval in package $line16 is not a subclass of
+        object $iw where target is defined
+
+(To diagnose errors in synthetic code, try adding `// show` to the end of your input.)
+
 
 scala> :type def f = 5
 => Int
@@ -75,7 +79,7 @@ TypeRef(
     )
     TypeRef(
       TypeSymbol(
-        sealed abstract class List[+A] extends AbstractSeq[A] with LinearSeq[A] with Product with GenericTraversableTemplate[A,List] with LinearSeqOptimized[A,List[A]] with FilteredTraversableInternal[A,List[A]] with Serializable
+        sealed abstract class List[+A] extends AbstractSeq[A] with LinearSeq[A] with LinearSeqOps[A,List,List[A]] with StrictOptimizedLinearSeqOps[A,List,List[A]] with StrictOptimizedSeqOps[A,List,List[A]] with IterableFactoryDefaults[A,List] with DefaultSerializable
 
       )
       args = List(
@@ -96,7 +100,7 @@ PolyType(
     params = List(TermSymbol(x: T), TermSymbol(y: U))
     resultType = TypeRef(
       TypeSymbol(
-        abstract trait Set[A] extends Iterable[A] with Set[A] with GenericSetTemplate[A,scala.collection.immutable.Set] with SetLike[A,scala.collection.immutable.Set[A]] with Parallelizable[A,scala.collection.parallel.immutable.ParSet[A]]
+        abstract trait Set[A] extends Iterable[A] with Set[A] with SetOps[A,scala.collection.immutable.Set,scala.collection.immutable.Set[A]] with IterableFactoryDefaults[A,scala.collection.immutable.Set]
 
       )
       args = List(TypeRef(TypeSymbol(abstract class Any extends )))
@@ -137,12 +141,13 @@ TypeRef(
     TypeRef(TypeSymbol(final abstract class Int extends AnyVal))
     TypeRef(
       TypeSymbol(
-        abstract trait Iterator[+A] extends TraversableOnce[A]
+        abstract trait Iterator[+A] extends IterableOnce[A] with IterableOnceOps[A,Iterator,Iterator[A]]
+
       )
       args = List(
         TypeRef(
           TypeSymbol(
-            sealed abstract class List[+A] extends AbstractSeq[A] with LinearSeq[A] with Product with GenericTraversableTemplate[A,List] with LinearSeqOptimized[A,List[A]] with FilteredTraversableInternal[A,List[A]] with Serializable
+            sealed abstract class List[+A] extends AbstractSeq[A] with LinearSeq[A] with LinearSeqOps[A,List,List[A]] with StrictOptimizedLinearSeqOps[A,List,List[A]] with StrictOptimizedSeqOps[A,List,List[A]] with IterableFactoryDefaults[A,List] with DefaultSerializable
 
           )
           args = List(
@@ -170,12 +175,13 @@ PolyType(
         TypeRef(TypeSymbol(final abstract class Int extends AnyVal))
         TypeRef(
           TypeSymbol(
-            abstract trait Iterator[+A] extends TraversableOnce[A]
+            abstract trait Iterator[+A] extends IterableOnce[A] with IterableOnceOps[A,Iterator,Iterator[A]]
+
           )
           args = List(
             TypeRef(
               TypeSymbol(
-                sealed abstract class List[+A] extends AbstractSeq[A] with LinearSeq[A] with Product with GenericTraversableTemplate[A,List] with LinearSeqOptimized[A,List[A]] with FilteredTraversableInternal[A,List[A]] with Serializable
+                sealed abstract class List[+A] extends AbstractSeq[A] with LinearSeq[A] with LinearSeqOps[A,List,List[A]] with StrictOptimizedLinearSeqOps[A,List,List[A]] with StrictOptimizedSeqOps[A,List,List[A]] with IterableFactoryDefaults[A,List] with DefaultSerializable
 
               )
               args = List(TypeParamTypeRef(TypeParam(T <: AnyVal)))
@@ -198,7 +204,7 @@ PolyType(
     params = List(TermSymbol(x: T), TermSymbol(y: List[U]))
     resultType = TypeRef(
       TypeSymbol(
-        sealed abstract class List[+A] extends AbstractSeq[A] with LinearSeq[A] with Product with GenericTraversableTemplate[A,List] with LinearSeqOptimized[A,List[A]] with FilteredTraversableInternal[A,List[A]] with Serializable
+        sealed abstract class List[+A] extends AbstractSeq[A] with LinearSeq[A] with LinearSeqOps[A,List,List[A]] with StrictOptimizedLinearSeqOps[A,List,List[A]] with StrictOptimizedSeqOps[A,List,List[A]] with IterableFactoryDefaults[A,List] with DefaultSerializable
 
       )
       args = List(TypeParamTypeRef(TypeParam(U >: T)))
@@ -208,7 +214,7 @@ PolyType(
 
 scala> 
 
-scala> // SI-7132 - :type doesn't understand Unit
+scala> // scala/bug#7132 - :type doesn't understand Unit
 
 scala> :type ()
 Unit

@@ -1,7 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2016 LAMP/EPFL and Lightbend, Inc
+/*
+ * Scala (https://www.scala-lang.org)
  *
- * @author Martin Odersky
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -11,9 +17,10 @@ import symtab._
 import Flags._
 import scala.annotation.tailrec
 import scala.collection.mutable
+import scala.reflect.NameTransformer
 
 
-abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthesis {
+abstract class Mixin extends Transform with ast.TreeDSL with AccessorSynthesis {
   import global._
   import definitions._
   import CODE._
@@ -25,7 +32,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
   /** Some trait methods need to be implemented in subclasses, so they cannot be private.
     *
     * We used to publicize during explicitouter (for some reason), so the condition is a bit more involved now it's done here
-    * (need to exclude lambdaLIFTED methods, as they do no exist during explicitouter and thus did not need to be excluded...)
+    * (need to exclude lambdaLIFTED methods, as they do not exist during explicitouter and thus did not need to be excluded...)
     *
     * They may be protected, now that traits are compiled 1:1 to interfaces.
     * The same disclaimers about mapping Scala's notion of visibility to Java's apply:
@@ -92,26 +99,45 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
   /** Returns the symbol that is accessed by a super-accessor in a mixin composition.
    *
    *  @param base       The class in which everything is mixed together
-   *  @param member     The symbol statically referred to by the superaccessor in the trait
+   *  @param acc        The symbol statically referred to by the superaccessor in the trait
    *  @param mixinClass The mixin class that produced the superaccessor
    */
-  private def rebindSuper(base: Symbol, member: Symbol, mixinClass: Symbol): Symbol =
+  private def rebindSuper(base: Symbol, acc: Symbol, mixinClass: Symbol): Symbol = {
+    val site = base.thisType
+
     exitingSpecialize {
-      var bcs = base.info.baseClasses.dropWhile(mixinClass != _).tail
+      // the specialized version T$sp of a trait T will have a super accessor that has the same alias
+      // as the super accessor in trait T; we must rebind super
+      // from the vantage point of the original trait T, not the specialized T$sp
+      // (it's inserted in the base class seq late in the game and doesn't count as a super class in the super-call scheme)
+      val superTargetClass = if (mixinClass.isSpecialized) unspecializedSymbol(mixinClass) else mixinClass
+      var bcs = base.info.baseClasses.dropWhile(superTargetClass != _).tail
       var sym: Symbol = NoSymbol
-      debuglog("starting rebindsuper " + base + " " + member + ":" + member.tpe +
-            " " + mixinClass + " " + base.info.baseClasses + "/" + bcs)
-      while (!bcs.isEmpty && sym == NoSymbol) {
-        if (settings.debug) {
-          val other = bcs.head.info.nonPrivateDecl(member.name)
-          debuglog("rebindsuper " + bcs.head + " " + other + " " + other.tpe +
-              " " + other.isDeferred)
-        }
-        sym = member.matchingSymbol(bcs.head, base.thisType).suchThat(sym => !sym.hasFlag(DEFERRED | BRIDGE))
+
+      // println(s"starting rebindsuper $base mixing in from $mixinClass: $acc : ${acc.tpe} of ${acc.owner} ; looking for super in $bcs (all bases: ${base.info.baseClasses})")
+
+      // don't rebind to specialized members unless we're looking for the super of a specialized member,
+      // since we can't jump back and forth between the unspecialized name and specialized one
+      // (So we jump into the non-specialized world and stay there until we hit our super.)
+      val likeSpecialized = if (acc.isSpecialized) 0 else SPECIALIZED
+
+      while (sym == NoSymbol && bcs.nonEmpty) {
+        sym = acc.matchingSymbol(bcs.head, site).suchThat(sym => !sym.hasFlag(DEFERRED | BRIDGE | likeSpecialized))
         bcs = bcs.tail
       }
+
+      // println(s"rebound $base from $mixinClass to $sym in ${sym.owner} ($bcs)")
+
+      // Having a matching symbol is not enough: its info should also be a subtype
+      // of the superaccessor's type, see test/files/run/t11351.scala
+      if ((sym ne acc) && sym.exists && !(sym.isErroneous || (site.memberInfo(sym) <:< site.memberInfo(acc))))
+        reporter.error(base.pos, s"illegal trait super target found for $acc required by $mixinClass;" +
+                                 s"\n found   : ${exitingTyper{sym.defStringSeenAs(site.memberInfo(sym))}} in ${sym.owner};" +
+                                 s"\n expected: ${exitingTyper{acc.defStringSeenAs(site.memberInfo(acc))}} in ${acc.owner}")
+
       sym
     }
+  }
 
 // --------- type transformation -----------------------------------------------
 
@@ -167,12 +193,38 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
       // Optimize: no need if mixinClass has no typeparams.
       // !!! JZ Really? What about the effect of abstract types, prefix?
       if (mixinClass.typeParams.isEmpty) sym
-      else sym modifyInfo (_ => forwarderInfo)
+      else {
+        sym modifyInfo (_ => forwarderInfo)
+        avoidTypeParamShadowing(mixinMember, sym)
+        sym
+      }
     }
     newSym
   }
 
-  def publicizeTraitMethods(clazz: Symbol) {
+  // scala/bug#11523 rename method type parameters that shadow enclosing class type parameters in the host class
+  // of the mixin forwarder
+  private def avoidTypeParamShadowing(mixinMember: Symbol, forwarder: Symbol): Unit = {
+    def isForwarderTparam(sym: Symbol) = {
+      val owner = sym.owner
+      // TODO fix forwarder's info should not refer to tparams of mixinMember, fix cloning in caller!
+      //      try forwarderInfo.cloneInfo(sym)
+      owner == forwarder || owner == mixinMember
+    }
+
+    val symTparams: mutable.Map[Name, Symbol] = mutable.Map.from(forwarder.typeParams.iterator.map(t => (t.name, t)))
+    forwarder.info.foreach {
+      case TypeRef(_, tparam, _) if tparam.isTypeParameter && !isForwarderTparam(tparam) =>
+        symTparams.get(tparam.name).foreach{ symTparam =>
+          debuglog(s"Renaming ${symTparam} (owned by ${symTparam.owner}, a mixin forwarder hosted in ${forwarder.enclClass.fullNameString}) to avoid shadowing enclosing type parameter of ${tparam.owner.fullNameString})")
+          symTparam.name = symTparam.name.append(NameTransformer.NAME_JOIN_STRING)
+          symTparams.remove(tparam.name) // only rename once
+        }
+      case _ =>
+    }
+  }
+
+  def publicizeTraitMethods(clazz: Symbol): Unit = {
     if (treatedClassInfos(clazz) != clazz.info) {
       treatedClassInfos(clazz) = clazz.info
       assert(phase == currentRun.mixinPhase, phase)
@@ -202,7 +254,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
    *      - for every super accessor in T, add an implementation of that accessor
    *      - for every module in T, add a module
    */
-  def addMixedinMembers(clazz: Symbol, unit: CompilationUnit) {
+  def addMixedinMembers(clazz: Symbol, unit: CompilationUnit): Unit = {
     def cloneAndAddMixinMember(mixinClass: Symbol, mixinMember: Symbol): Symbol = (
       cloneAndAddMember(mixinClass, mixinMember, clazz)
            setPos clazz.pos
@@ -210,7 +262,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
     )
 
     /* Mix in members of implementation class mixinClass into class clazz */
-    def mixinTraitForwarders(mixinClass: Symbol) {
+    def mixinTraitForwarders(mixinClass: Symbol): Unit = {
       for (member <- mixinClass.info.decls ; if isImplementedStatically(member)) {
         member overridingSymbol clazz match {
           case NoSymbol =>
@@ -218,13 +270,17 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
             if (isMemberOfClazz) {
               def genForwarder(required: Boolean): Unit = {
                 val owner = member.owner
-                if (owner.isJavaDefined && owner.isInterface && !clazz.parentSymbols.contains(owner)) {
+                val isJavaInterface = owner.isJavaDefined && owner.isInterface
+                if (isJavaInterface && !clazz.parentSymbolsIterator.contains(owner)) {
                   if (required) {
                     val text = s"Unable to implement a mixin forwarder for $member in $clazz unless interface ${owner.name} is directly extended by $clazz."
                     reporter.error(clazz.pos, text)
                   }
-                } else
+                } else {
+                  if (isJavaInterface)
+                    erasure.requiredDirectInterfaces.getOrElseUpdate(clazz, mutable.Set.empty) += owner
                   cloneAndAddMixinMember(mixinClass, member).asInstanceOf[TermSymbol] setAlias member
+                }
               }
 
               // `member` is a concrete method defined in `mixinClass`, which is a base class of
@@ -279,7 +335,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
 
     /* Mix in members of trait mixinClass into class clazz.
      */
-    def mixinTraitMembers(mixinClass: Symbol) {
+    def mixinTraitMembers(mixinClass: Symbol): Unit = {
       // For all members of a trait's interface do:
       for (mixinMember <- mixinClass.info.decls) {
         if (mixinMember.hasFlag(SUPERACCESSOR)) { // mixin super accessors
@@ -291,9 +347,12 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
               reporter.error(clazz.pos, "Member %s of mixin %s is missing a concrete super implementation.".format(
                 mixinMember.alias, mixinClass))
             case alias1 =>
-              if (alias1.owner.isJavaDefined && alias1.owner.isInterface && !clazz.parentSymbols.contains(alias1.owner)) {
-                val suggestedParent = exitingTyper(clazz.info.baseType(alias1.owner))
-                reporter.error(clazz.pos, s"Unable to implement a super accessor required by trait ${mixinClass.name} unless $suggestedParent is directly extended by $clazz.")
+              if (alias1.owner.isJavaDefined && alias1.owner.isInterface) {
+                if (!clazz.parentSymbolsIterator.contains(alias1.owner)) {
+                  val suggestedParent = exitingTyper(clazz.info.baseType(alias1.owner))
+                  reporter.error(clazz.pos, s"Unable to implement a super accessor required by trait ${mixinClass.name} unless $suggestedParent is directly extended by $clazz.")
+                } else
+                  erasure.requiredDirectInterfaces.getOrElseUpdate(clazz, mutable.Set.empty) += alias1.owner
               }
               superAccessor.asInstanceOf[TermSymbol] setAlias alias1
           }
@@ -342,14 +401,12 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
 
     for (mc <- clazz.mixinClasses ; if mc.isTrait) {
       // @SEAN: adding trait tracking so we don't have to recompile transitive closures
-      unit.depends += mc
+      unit.registerDependency(mc)
       publicizeTraitMethods(mc)
       mixinTraitMembers(mc)
       mixinTraitForwarders(mc)
     }
   }
-
-  override def transformInfo(sym: Symbol, tp: Type): Type = tp
 
 // --------- term transformation -----------------------------------------------
 
@@ -423,8 +480,8 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
         val singleUseFields: Map[Symbol, List[Symbol]] = {
           val usedIn = mutable.HashMap[Symbol, List[Symbol]]() withDefaultValue Nil
 
-          object SingleUseTraverser extends Traverser {
-            override def traverse(tree: Tree) {
+          object SingleUseTraverser extends InternalTraverser {
+            override def traverse(tree: Tree): Unit = {
               tree match {
                 // assignment targets don't count as a dereference -- only check the rhs
                 case Assign(_, rhs) => traverse(rhs)
@@ -438,15 +495,15 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
                     // println("added use in: " + currentOwner + " -- " + tree)
                     usedIn(sym) ::= currentOwner
                   }
-                  super.traverse(tree)
-                case _ => super.traverse(tree)
+                  tree.traverse(this)
+                case _ => tree.traverse(this)
               }
             }
           }
           templStats foreach SingleUseTraverser.apply
           // println("usedIn: " + usedIn)
 
-          // only consider usages from non-transient lazy vals (SI-9365)
+          // only consider usages from non-transient lazy vals (scala/bug#9365)
           val singlyUsedIn = usedIn.filter {
             case (_, member :: Nil) if member.name.endsWith(nme.LAZY_SLOW_SUFFIX) =>
               val lazyAccessor = member.owner.info.decl(member.name.stripSuffix(nme.LAZY_SLOW_SUFFIX))
@@ -462,7 +519,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
         // invert the map to see which fields can be nulled for each non-transient lazy val
         for ((field, users) <- singleUseFields; lazyFld <- users) map(lazyFld) += field
 
-        map.mapValues(_.toList sortBy (_.id)).toMap
+        map.view.mapValues(_.toList.sortBy(_.id)).toMap
       }
     }
 
@@ -521,6 +578,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
          */
         def completeSuperAccessor(stat: Tree) = stat match {
           case DefDef(_, _, _, vparams :: Nil, _, EmptyTree) if stat.symbol.isSuperAccessor =>
+            debuglog(s"implementing super accessor in $clazz for ${stat.symbol} --> ${stat.symbol.alias.owner} . ${stat.symbol.alias}")
             val body = atPos(stat.pos)(Apply(SuperSelect(clazz, stat.symbol.alias), vparams map (v => Ident(v.symbol))))
             val pt   = stat.symbol.tpe.resultType
 
@@ -588,7 +646,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL with AccessorSynthes
      */
     override def transform(tree: Tree): Tree = {
       val saved = localTyper
-      val tree1 = super.transform(preTransform(tree))
+      val tree1 = preTransform(tree).transform(this)
       // localTyper needed when not flattening inner classes. parts after an
       // inner class will otherwise be typechecked with a wrong scope
       try exitingMixin(postTransform(tree1))

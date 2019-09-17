@@ -6,7 +6,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
-import scala.tools.testing.AssertUtil._
+import scala.tools.testkit.AssertUtil._
 
 @RunWith(classOf[JUnit4])
 class StdNamesTest {
@@ -27,7 +27,7 @@ class StdNamesTest {
 
   @Test
   def testUnspecializedName(): Unit = {
-    def test(expected: Name, nme: Name) {
+    def test(expected: Name, nme: Name): Unit = {
       assertEquals(expected, unspecializedName(nme))
     }
     test(TermName("Tuple2"), TermName("Tuple2$mcII" + SPECIALIZED_SUFFIX))
@@ -39,7 +39,7 @@ class StdNamesTest {
 
   @Test
   def testSplitSpecializedName(): Unit = {
-    def test(expected: (Name, String, String), nme: Name) {
+    def test(expected: (Name, String, String), nme: Name): Unit = {
       assertEquals(expected, splitSpecializedName(nme))
     }
     test((TermName("Tuple2"), "II", ""), TermName("Tuple2$mcII" + SPECIALIZED_SUFFIX))

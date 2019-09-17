@@ -1,20 +1,45 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2014 LAMP/EPFL
- * @author  Jason Zaugg
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
+
 package scala.reflect.internal
 package tpe
 
+import util.{ReusableInstance, StatisticsStatics}
 import Flags._
-import util.Statistics
-import TypesStats._
+import scala.runtime.Statics.releaseFence
 
 trait FindMembers {
   this: SymbolTable =>
+  import statistics._
 
   /** Implementation of `Type#{findMember, findMembers}` */
-  private[internal] abstract class FindMemberBase[T](tpe: Type, name: Name, excludedFlags: Long, requiredFlags: Long) {
-    protected val initBaseClasses: List[Symbol] = tpe.baseClasses
+  private[internal] abstract class FindMemberBase[T] {
+    protected var tpe: Type = _
+    protected var name: Name = _
+    protected var excludedFlags: Long = 0L
+    protected var requiredFlags: Long = 0L
+    protected var initBaseClasses: List[Symbol] = _
+
+    protected def init(tpe: Type, name: Name, excludedFlags: Long, requiredFlags: Long): Unit = {
+      this.tpe = tpe
+      this.name = name
+      this.excludedFlags = excludedFlags
+      this.requiredFlags = requiredFlags
+      initBaseClasses = tpe.baseClasses
+      _selectorClass = null
+      _self = null
+      _memberTypeHiCache = null
+      _memberTypeHiCacheSym = null
+    }
 
     // The first base class, or the symbol of the ThisType
     // e.g in:
@@ -25,7 +50,7 @@ trait FindMembers {
     private def selectorClass: Symbol = {
       if (_selectorClass eq null) {
         _selectorClass = tpe match {
-          case tt: ThisType => tt.sym // SI-7507 the first base class is not necessarily the selector class.
+          case tt: ThisType => tt.sym // scala/bug#7507 the first base class is not necessarily the selector class.
           case _            => initBaseClasses.head
         }
       }
@@ -33,20 +58,20 @@ trait FindMembers {
     }
 
     // Cache for the narrowed type of `tp` (in `tp.findMember`).
-    // This is needed to avoid mismatched existential types are reported in SI-5330.
+    // This is needed to avoid mismatched existential types are reported in scala/bug#5330.
     private[this] var _self: Type = null
     protected def self: Type = {
-      // TODO: use narrow only for modules? (correct? efficiency gain?) (<-- Note: this comment predates SI-5330)
+      // TODO: use narrow only for modules? (correct? efficiency gain?) (<-- Note: this comment predates scala/bug#5330)
       if (_self eq null) _self = narrowForFindMember(tpe)
       _self
     }
 
     // Main entry point
     def apply(): T = {
-      if (Statistics.canEnable) Statistics.incCounter(findMemberCount)
-      val start = if (Statistics.canEnable) Statistics.pushTimer(typeOpsStack, findMemberNanos) else null
+      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(findMemberCount)
+      val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.pushTimer(typeOpsStack, findMemberNanos) else null
       try searchConcreteThenDeferred
-      finally if (Statistics.canEnable) Statistics.popTimer(typeOpsStack, start)
+      finally if (StatisticsStatics.areSomeColdStatsEnabled) statistics.popTimer(typeOpsStack, start)
     }
 
     protected def result: T
@@ -73,9 +98,9 @@ trait FindMembers {
       // Have we seen a candidate deferred member?
       var deferredSeen = false
 
-      // All direct parents of refinement classes in the base class sequence
+      // All refinement classes in the base class sequence
       // from the current `walkBaseClasses`
-      var refinementParents: List[Symbol] = Nil
+      var refinementClasses: List[Symbol] = Nil
 
       // Has the current `walkBaseClasses` encountered a non-refinement class?
       var seenFirstNonRefinementClass = false
@@ -93,7 +118,7 @@ trait FindMembers {
           if (meetsRequirements) {
             val excl: Long = flags & excluded
             val isExcluded: Boolean = excl != 0L
-            if (!isExcluded && isPotentialMember(sym, flags, currentBaseClass, seenFirstNonRefinementClass, refinementParents)) {
+            if (!isExcluded && isPotentialMember(sym, flags, currentBaseClass, seenFirstNonRefinementClass, refinementClasses)) {
               if (shortCircuit(sym)) return false
               else addMemberIfNew(sym)
             } else if (excl == DEFERRED) {
@@ -109,8 +134,8 @@ trait FindMembers {
           // SLS 3.2.7 A compound type T1 with . . . with Tn {R } represents objects with members as given in
           //           the component types T1, ..., Tn and the refinement {R }
           //
-          //           => private members should be included from T1, ... Tn. (SI-7475)
-          refinementParents :::= currentBaseClass.parentSymbols
+          //           => private members should be included from T1, ... Tn. (scala/bug#7475)
+          refinementClasses ::= currentBaseClass
         else if (currentBaseClass.isClass)
           seenFirstNonRefinementClass = true // only inherit privates of refinement parents after this point
 
@@ -130,23 +155,22 @@ trait FindMembers {
     // Q. When does a potential member fail to be an actual member?
     // A. if it is subsumed by an member in a subclass.
     private def isPotentialMember(sym: Symbol, flags: Long, owner: Symbol,
-                                  seenFirstNonRefinementClass: Boolean, refinementParents: List[Symbol]): Boolean = {
+                                  seenFirstNonRefinementClass: Boolean, refinementClasses: List[Symbol]): Boolean = {
       // conservatively (performance wise) doing this with flags masks rather than `sym.isPrivate`
       // to avoid multiple calls to `Symbol#flags`.
       val isPrivate      = (flags & PRIVATE) == PRIVATE
       val isPrivateLocal = (flags & PrivateLocal) == PrivateLocal
 
       // TODO Is the special handling of `private[this]` vs `private` backed up by the spec?
-      def admitPrivate(sym: Symbol): Boolean =
-        (selectorClass == owner) || (
-             !isPrivateLocal // private[this] only a member from within the selector class. (Optimization only? Does the spec back this up?)
-          && (
-                  !seenFirstNonRefinementClass
-               || refinementParents.contains(owner)
-             )
+      def admitPrivate: Boolean =
+          // private[this] only a member from within the selector class.
+          // (Optimization only? Does the spec back this up?)
+        !isPrivateLocal && ( !seenFirstNonRefinementClass ||
+          refinementClasses.exists(_.info.parents.exists(_.typeSymbol == owner))
         )
 
-      (!isPrivate || admitPrivate(sym)) && (sym.name != nme.CONSTRUCTOR || owner == initBaseClasses.head)
+      (!sym.isClassConstructor || owner == initBaseClasses.head) &&
+        (!isPrivate || owner == selectorClass || admitPrivate)
     }
 
     // True unless the already-found member of type `memberType` matches the candidate symbol `other`.
@@ -180,7 +204,7 @@ trait FindMembers {
     /** Same as a call to narrow unless existentials are visible
      *  after widening the type. In that case, narrow from the widened
      *  type instead of the proxy. This gives buried existentials a
-     *  chance to make peace with the other types. See SI-5330.
+     *  chance to make peace with the other types. See scala/bug#5330.
      */
     private def narrowForFindMember(tp: Type): Type = {
       val w = tp.widen
@@ -191,7 +215,9 @@ trait FindMembers {
   }
 
   private[reflect] final class FindMembers(tpe: Type, excludedFlags: Long, requiredFlags: Long)
-    extends FindMemberBase[Scope](tpe, nme.ANYname, excludedFlags, requiredFlags) {
+    extends FindMemberBase[Scope]() {
+    init(tpe, nme.ANYname, excludedFlags, requiredFlags)
+
     private[this] var _membersScope: Scope   = null
     private def membersScope: Scope = {
       if (_membersScope eq null) _membersScope = newFindMemberScope
@@ -214,14 +240,26 @@ trait FindMembers {
       if (isNew) members.enter(sym)
     }
   }
+  private[reflect] val findMemberInstance: ReusableInstance[FindMember] = new ReusableInstance(() => new FindMember, enabled = isCompilerUniverse)
 
-  private[reflect] final class FindMember(tpe: Type, name: Name, excludedFlags: Long, requiredFlags: Long, stableOnly: Boolean)
-    extends FindMemberBase[Symbol](tpe, name, excludedFlags, requiredFlags) {
+  private[reflect] final class FindMember
+    extends FindMemberBase[Symbol] {
+
+    private[this] var stableOnly: Boolean = false
     // Gathering the results into a hand rolled ListBuffer
     // TODO Try just using a ListBuffer to see if this low-level-ness is worth it.
-    private[this] var member0: Symbol       = NoSymbol
-    private[this] var members: List[Symbol] = null
-    private[this] var lastM: ::[Symbol]     = null
+    private[this] var member0: Symbol       = _
+    private[this] var members: List[Symbol] = _
+    private[this] var lastM: ::[Symbol]     = _
+
+    def init(tpe: Type, name: Name, excludedFlags: Long, requiredFlags: Long, stableOnly: Boolean): Unit = {
+      super.init(tpe, name, excludedFlags, requiredFlags)
+      this.stableOnly = stableOnly
+      member0 = NoSymbol
+      _member0Tpe = null
+      members = null
+      lastM = null
+    }
 
     private def clearAndAddResult(sym: Symbol): Unit = {
       member0 = sym
@@ -257,7 +295,7 @@ trait FindMembers {
         }
         if (isNew) {
           val lastM1 = new ::(sym, null)
-          lastM.tl = lastM1
+          lastM.next = lastM1
           lastM = lastM1
         }
       }
@@ -265,7 +303,7 @@ trait FindMembers {
     // Cache for the member type of the first member we find.
     private[this] var _member0Tpe: Type = null
     private[this] def member0Tpe: Type = {
-      assert(member0 != null)
+      assert(member0 != null, "member0 must not be null for member type")
       if (_member0Tpe eq null) _member0Tpe = self.memberType(member0)
       _member0Tpe
     }
@@ -276,13 +314,29 @@ trait FindMembers {
     // Assemble the result from the hand-rolled ListBuffer
     protected def result: Symbol = if (members eq null) {
       if (member0 == NoSymbol) {
-        if (Statistics.canEnable) Statistics.incCounter(noMemberCount)
+        if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(noMemberCount)
         NoSymbol
       } else member0
     } else {
-      if (Statistics.canEnable) Statistics.incCounter(multMemberCount)
-      lastM.tl = Nil
+      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(multMemberCount)
+      lastM.next = Nil
+      releaseFence()
       initBaseClasses.head.newOverloaded(tpe, members)
     }
   }
+
+  private[scala] final class HasMember(tpe: Type, name: Name, excludedFlags: Long, requiredFlags: Long) extends FindMemberBase[Boolean] {
+    init(tpe, name, excludedFlags, requiredFlags)
+    private[this] var _result = false
+    override protected def result: Boolean = _result
+
+    protected def shortCircuit(sym: Symbol): Boolean = {
+      _result = true
+      true // prevents call to addMemberIfNew
+    }
+
+    // Not used
+    protected def addMemberIfNew(sym: Symbol): Unit = {}
+  }
+
 }

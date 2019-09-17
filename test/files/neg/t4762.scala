@@ -1,4 +1,6 @@
-// https://issues.scala-lang.org/browse/SI-4762
+// scalac: -Xlint -Xfatal-warnings
+//
+// https://github.com/scala/bug/issues/4762
 
 // In A, x and y are -1.
 class A(var x: Int) {
@@ -44,7 +46,7 @@ object Test {
 }
 
 class bug4762 {
-  class Base( var x : Int ) { def increment() { x = x + 1 } }
+  class Base( var x : Int ) { def increment(): Unit = { x = x + 1 } }
   class Derived( x : Int ) extends Base( x ) { override def toString = x.toString }
 
   val derived = new Derived( 1 )

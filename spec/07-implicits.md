@@ -155,7 +155,7 @@ sort(yss)
 The call above will be completed by passing two nested implicit arguments:
 
 ```scala
-sort(yss)(xs: List[Int] => list2ordered[Int](xs)(int2ordered)) .
+sort(yss)((xs: List[Int]) => list2ordered[Int](xs)(int2ordered))
 ```
 
 The possibility of passing implicit arguments to implicit arguments
@@ -177,22 +177,91 @@ expansion:
 sort(arg)(x => magic(x)(x => magic(x)(x => ... )))
 ```
 
-To prevent such infinite expansions, the compiler keeps track of
-a stack of “open implicit types” for which implicit arguments are currently being
-searched. Whenever an implicit argument for type $T$ is searched, the
-“core type” of $T$ is added to the stack. Here, the _core type_
-of $T$ is $T$ with aliases expanded, top-level type [annotations](11-annotations.html#user-defined-annotations) and
-[refinements](03-types.html#compound-types) removed, and occurrences
-of top-level existentially bound variables replaced by their upper
-bounds. The core type is removed from the stack once the search for
-the implicit argument either definitely fails or succeeds. Everytime a
-core type is added to the stack, it is checked that this type does not
-dominate any of the other types in the set.
+Such infinite expansions should be detected and reported as errors, however to support the deliberate
+implicit construction of recursive values we allow implicit arguments to be marked as by-name. At call
+sites recursive uses of implicit values are permitted if they occur in an implicit by-name argument.
 
-Here, a core type $T$ _dominates_ a type $U$ if $T$ is
-[equivalent](03-types.html#equivalence)
-to $U$, or if the top-level type constructors of $T$ and $U$ have a
-common element and $T$ is more complex than $U$.
+Consider the following example,
+
+```scala
+trait Foo {
+  def next: Foo
+}
+
+object Foo {
+  implicit def foo(implicit rec: Foo): Foo =
+    new Foo { def next = rec }
+}
+
+val foo = implicitly[Foo]
+assert(foo eq foo.next)
+```
+
+As with the `magic` case above this diverges due to the recursive implicit argument `rec` of method
+`foo`. If we mark the implicit argument as by-name,
+
+```scala
+trait Foo {
+  def next: Foo
+}
+
+object Foo {
+  implicit def foo(implicit rec: => Foo): Foo =
+    new Foo { def next = rec }
+}
+
+val foo = implicitly[Foo]
+assert(foo eq foo.next)
+```
+
+the example compiles with the assertion successful.
+
+When compiled, recursive by-name implicit arguments of this sort are extracted out as val members of a
+local synthetic object at call sites as follows,
+
+```scala
+val foo: Foo = scala.Predef.implicitly[Foo](
+  {
+    object LazyDefns$1 {
+      val rec$1: Foo = Foo.foo(rec$1)
+                       //      ^^^^^
+                       // recursive knot tied here
+    }
+    LazyDefns$1.rec$1
+  }
+)
+assert(foo eq foo.next)
+```
+
+Note that the recursive use of `rec$1` occurs within the by-name argument of `foo` and is consequently
+deferred. The desugaring matches what a programmer would do to construct such a recursive value
+explicitly.
+
+To prevent infinite expansions, such as the `magic` example above, the compiler keeps track of a stack
+of “open implicit types” for which implicit arguments are currently being searched. Whenever an
+implicit argument for type $T$ is searched, $T$ is added to the stack paired with the implicit
+definition which produces it, and whether it was required to satisfy a by-name implicit argument or
+not. The type is removed from the stack once the search for the implicit argument either definitely
+fails or succeeds. Everytime a type is about to be added to the stack, it is checked against
+existing entries which were produced by the same implicit definition and then,
+
++ if it is equivalent to some type which is already on the stack and there is a by-name argument between
+  that entry and the top of the stack. In this case the search for that type succeeds immediately and
+  the implicit argument is compiled as a recursive reference to the found argument.  That argument is
+  added as an entry in the synthesized implicit dictionary if it has not already been added.
++ otherwise if the _core_ of the type _dominates_ the core of a type already on the stack, then the
+  implicit expansion is said to _diverge_ and the search for that type fails immediately.
++ otherwise it is added to the stack paired with the implicit definition which produces it.
+  Implicit resolution continues with the implicit arguments of that definition (if any).
+
+Here, the _core type_ of $T$ is $T$ with aliases expanded,
+top-level type [annotations](11-annotations.html#user-defined-annotations) and
+[refinements](03-types.html#compound-types) removed, and occurrences of top-level existentially bound
+variables replaced by their upper bounds.
+
+A core type $T$ _dominates_ a type $U$ if $T$ is [equivalent](03-types.html#equivalence) to $U$,
+or if the top-level type constructors of $T$ and $U$ have a common element and $T$ is more complex
+than $U$ and the _covering sets_ of $T$ and $U$ are equal.
 
 The set of _top-level type constructors_ $\mathit{ttcs}(T)$ of a type $T$ depends on the form of
 the type:
@@ -211,6 +280,21 @@ the type:
 - For any other singleton type, $\operatorname{complexity}(p.type) ~=~ 1 + \operatorname{complexity}(T)$, provided $p$ has type $T$;
 - For a compound type, `$\operatorname{complexity}(T_1$ with $\ldots$ with $T_n)$` $= \Sigma\operatorname{complexity}(T_i)$
 
+The _covering set_ $\mathit{cs}(T)$ of a type $T$ is the set of type designators mentioned in a type.
+For example, given the following,
+
+```scala
+type A = List[(Int, Int)]
+type B = List[(Int, (Int, Int))]
+type C = List[(Int, String)]
+```
+
+the corresponding covering sets are:
+
+- $\mathit{cs}(A)$: List, Tuple2, Int
+- $\mathit{cs}(B)$: List, Tuple2, Int
+- $\mathit{cs}(C)$: List, Tuple2, Int, String
+
 ###### Example
 When typing `sort(xs)` for some list `xs` of type `List[List[List[Int]]]`,
 the sequence of types for
@@ -218,7 +302,7 @@ which implicit arguments are searched is
 
 ```scala
 List[List[Int]] => Ordered[List[List[Int]]],
-List[Int] => Ordered[List[Int]]
+List[Int] => Ordered[List[Int]],
 Int => Ordered[Int]
 ```
 
@@ -251,7 +335,7 @@ will issue an error signalling a divergent implicit expansion.
 Implicit parameters and methods can also define implicit conversions
 called views. A _view_ from type $S$ to type $T$ is
 defined by an implicit value which has function type
-`$S$=>$T$` or `(=>$S$)=>$T$` or by a method convertible to a value of that
+`$S$ => $T$` or `(=> $S$) => $T$` or by a method convertible to a value of that
 type.
 
 Views are applied in three situations:
@@ -277,7 +361,7 @@ Views are applied in three situations:
     the implicit scope is the one of $T$.  If such a view is found, the
     selection $e.m$ is converted to `$v$($e$).$m(\mathit{args})$`.
 
-The implicit view, if it is found, can accept is argument $e$ as a
+The implicit view, if it is found, can accept its argument $e$ as a
 call-by-value or as a call-by-name parameter. However, call-by-value
 implicits take precedence over call-by-name implicits.
 
@@ -290,7 +374,7 @@ or the call-by-name category).
 Class `scala.Ordered[A]` contains a method
 
 ```scala
-  def <= [B >: A](that: B)(implicit b2ordered: B => Ordered[B]): Boolean .
+  def <= [B >: A](that: B)(implicit b2ordered: B => Ordered[B]): Boolean
 ```
 
 Assume two lists `xs` and `ys` of type `List[Int]`

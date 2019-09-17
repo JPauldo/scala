@@ -1,14 +1,20 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
+
 package scala.tools.nsc
 package typechecker
 
 import scala.reflect.NameTransformer
 import symtab.Flags._
-import scala.reflect.internal.util.StringOps.ojoin
-import scala.reflect.internal.util.ListOfNil
 
 /** Logic related to method synthesis which involves cooperation between
  *  Namer and Typer.
@@ -78,10 +84,19 @@ trait MethodSynthesis {
     def forwardMethod(original: Symbol, newMethod: Symbol)(transformArgs: List[Tree] => List[Tree]): Tree =
       createMethod(original)(m => gen.mkMethodCall(newMethod, transformArgs(m.paramss.head map Ident)))
 
-    def createSwitchMethod(name: Name, range: Seq[Int], returnType: Type)(f: Int => Tree) = {
+    def createSwitchMethod(name: Name, range: Seq[Int], returnType: Type)(f: Int => Tree): Tree = {
+      def dflt(arg: Tree) = currentRun.runDefinitions.RuntimeStatics_ioobe match {
+        case NoSymbol =>
+          // Support running the compiler with an older library on the classpath
+          Throw(IndexOutOfBoundsExceptionClass.tpe_*, fn(arg, nme.toString_))
+        case ioobeSym =>
+          val ioobeTypeApply = TypeApply(gen.mkAttributedRef(ioobeSym), List(TypeTree(returnType)))
+          Apply(ioobeTypeApply, List(arg))
+      }
+
       createMethod(name, List(IntTpe), returnType) { m =>
         val arg0    = Ident(m.firstParam)
-        val default = DEFAULT ==> Throw(IndexOutOfBoundsExceptionClass.tpe_*, fn(arg0, nme.toString_))
+        val default = DEFAULT ==> dflt(arg0)
         val cases   = range.map(num => CASE(LIT(num)) ==> f(num)).toList :+ default
 
         Match(arg0, cases)
@@ -133,7 +148,7 @@ trait MethodSynthesis {
       // only one symbol can have `tree.pos`, the others must focus their position
       // normally the field gets the range position, but if there is none, give it to the getter
       //
-      // SI-10009 the tree's modifiers can be temporarily out of sync with the new symbol's flags.
+      // scala/bug#10009 the tree's modifiers can be temporarily out of sync with the new symbol's flags.
       //          typedValDef corrects this later on.
       tree.symbol = fieldSym orElse (getterSym setPos tree.pos)
 
@@ -220,10 +235,17 @@ trait MethodSynthesis {
 
 
     def enterImplicitWrapper(classDef: ClassDef): Unit = {
-      val methDef = factoryMeth(classDef.mods & AccessFlags | METHOD | IMPLICIT | SYNTHETIC, classDef.name.toTermName, classDef)
-      val methSym = assignAndEnterSymbol(methDef)
+      val methDef = factoryMeth(classDef.mods & (AccessFlags | FINAL) | METHOD | IMPLICIT | SYNTHETIC, classDef.name.toTermName, classDef)
+      val methSym = enterInScope(assignMemberSymbol(methDef))
       context.unit.synthetics(methSym) = methDef
-      methSym setInfo implicitFactoryMethodCompleter(methDef, classDef.symbol, completerOf(methDef).asInstanceOf[LockingTypeCompleter])
+
+      treeInfo.firstConstructor(classDef.impl.body) match {
+        case primaryConstructor: DefDef =>
+          if (mexists(primaryConstructor.vparamss)(_.mods.hasDefault))
+            enterDefaultGetters(methSym, primaryConstructor, primaryConstructor.vparamss, primaryConstructor.tparams)
+        case _ =>
+      }
+      methSym setInfo implicitFactoryMethodCompleter(methDef, classDef.symbol)
     }
 
 

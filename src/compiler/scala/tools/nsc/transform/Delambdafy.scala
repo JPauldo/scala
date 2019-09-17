@@ -1,3 +1,15 @@
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
+
 package scala.tools.nsc
 package transform
 
@@ -28,7 +40,7 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
   /** the following two members override abstract members in Transform */
   val phaseName: String = "delambdafy"
 
-  final case class LambdaMetaFactoryCapable(target: Symbol, arity: Int, functionalInterface: Symbol, sam: Symbol, isSerializable: Boolean, addScalaSerializableMarker: Boolean)
+  final case class LambdaMetaFactoryCapable(lambdaTarget: Symbol, arity: Int, functionalInterface: Symbol, sam: Symbol, bridges: List[Symbol], isSerializable: Boolean)
 
   /**
     * Get the symbol of the target lifted lambda body method from a function. I.e. if
@@ -59,7 +71,10 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
     private[this] lazy val methodReferencesThis: Set[Symbol] =
       (new ThisReferringMethodsTraverser).methodReferencesThisIn(unit.body)
 
-    private def mkLambdaMetaFactoryCall(fun: Function, target: Symbol, functionalInterface: Symbol, samUserDefined: Symbol, isSpecialized: Boolean): Tree = {
+    private def mkLambdaMetaFactoryCall(fun: Function, target: Symbol, functionalInterface: Symbol, samUserDefined: Symbol, userSamCls: Symbol, isSpecialized: Boolean): Tree = {
+      /* user-defined SAM types should have gotten a class symbol made for them in `typer` */
+      assert(isFunctionType(fun.tpe) || (samUserDefined.exists && userSamCls.isClass), s"$fun / ${fun.symbol} / ${fun.tpe}")
+
       val pos = fun.pos
       def isSelfParam(p: Symbol) = p.isSynthetic && p.name == nme.SELF
       val hasSelfParam = isSelfParam(target.firstParam)
@@ -95,8 +110,17 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
 
       // no need for adaptation when the implemented sam is of a specialized built-in function type
       val lambdaTarget = if (isSpecialized) target else createBoxingBridgeMethodIfNeeded(fun, target, functionalInterface, sam)
-      val isSerializable = samUserDefined == NoSymbol || samUserDefined.owner.isNonBottomSubClass(definitions.JavaSerializableClass)
-      val addScalaSerializableMarker = samUserDefined == NoSymbol
+      val isSerializable = samUserDefined == NoSymbol || samUserDefined.owner.isNonBottomSubClass(definitions.SerializableClass)
+
+      val samBridges = logResultIf[List[Symbol]](s"will add SAM bridges for $fun", _.nonEmpty) {
+        userSamCls.fold[List[Symbol]](Nil) {
+          _.info.findMember(sam.name, excludedFlags = 0L, requiredFlags = BRIDGE, stableOnly = false) match {
+            case NoSymbol => Nil
+            case bridges if bridges.isOverloaded => bridges.alternatives
+            case bridge => bridge :: Nil
+          }
+        }
+      }
 
       // The backend needs to know the target of the lambda and the functional interface in order
       // to emit the invokedynamic instruction. We pass this information as tree attachment.
@@ -104,7 +128,7 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
       // see https://docs.oracle.com/javase/8/docs/api/java/lang/invoke/LambdaMetafactory.html
       //   instantiatedMethodType is derived from lambdaTarget's signature
       //   samMethodType is derived from samOf(functionalInterface)'s signature
-      apply.updateAttachment(LambdaMetaFactoryCapable(lambdaTarget, fun.vparams.length, functionalInterface, sam, isSerializable, addScalaSerializableMarker))
+      apply.updateAttachment(LambdaMetaFactoryCapable(lambdaTarget, fun.vparams.length, functionalInterface, sam, samBridges, isSerializable))
 
       apply
     }
@@ -254,8 +278,11 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
           (functionalInterface, isSpecialized)
         }
 
-      val sam = originalFunction.attachments.get[SAMFunction].map(_.sam).getOrElse(NoSymbol)
-      mkLambdaMetaFactoryCall(originalFunction, target, functionalInterface, sam, isSpecialized)
+      val (sam, synthCls) = originalFunction.attachments.get[SAMFunction] match {
+        case Some(SAMFunction(_, sam, synthCls)) => (sam,      synthCls)
+        case None                                => (NoSymbol, NoSymbol)
+      }
+      mkLambdaMetaFactoryCall(originalFunction, target, functionalInterface, sam, synthCls, isSpecialized)
     }
 
     // here's the main entry point of the transform
@@ -280,8 +307,9 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
           Template(parents, self, body ++ boxingBridgeMethods)
         } finally boxingBridgeMethods.clear()
       case dd: DefDef if dd.symbol.isLiftedMethod && !dd.symbol.isDelambdafyTarget =>
-        // SI-9390 emit lifted methods that don't require a `this` reference as STATIC
+        // scala/bug#9390 emit lifted methods that don't require a `this` reference as STATIC
         // delambdafy targets are excluded as they are made static by `transformFunction`.
+        // a synchronized method cannot be static (`methodReferencesThis` will not see the implicit this reference due to `this.synchronized`)
         if (!dd.symbol.hasFlag(STATIC) && !methodReferencesThis(dd.symbol)) {
           dd.symbol.setFlag(STATIC)
           dd.symbol.removeAttachment[mixer.NeedStaticImpl.type]
@@ -300,7 +328,7 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
   // A traverser that finds symbols used but not defined in the given Tree
   // TODO freeVarTraverser in LambdaLift does a very similar task. With some
   // analysis this could probably be unified with it
-  class FreeVarTraverser extends Traverser {
+  class FreeVarTraverser extends InternalTraverser {
     val freeVars = mutable.LinkedHashSet[Symbol]()
     val declared = mutable.LinkedHashSet[Symbol]()
 
@@ -317,7 +345,7 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
           if ((sym != NoSymbol) && sym.isLocalToBlock && sym.isTerm && !sym.isMethod && !declared.contains(sym)) freeVars += sym
         case _ =>
       }
-      super.traverse(tree)
+      tree.traverse(this)
     }
   }
 
@@ -330,12 +358,12 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
   }
 
   // finds all methods that reference 'this'
-  class ThisReferringMethodsTraverser extends Traverser {
+  class ThisReferringMethodsTraverser extends InternalTraverser {
     // the set of methods that refer to this
     private val thisReferringMethods = mutable.Set[Symbol]()
 
     // the set of lifted lambda body methods that each method refers to
-    private val liftedMethodReferences = mutable.Map[Symbol, Set[Symbol]]().withDefault(_ => mutable.Set())
+    private val liftedMethodReferences = mutable.Map[Symbol, mutable.Set[Symbol]]()
 
     def methodReferencesThisIn(tree: Tree) = {
       traverse(tree)
@@ -347,13 +375,13 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
     // recursively find methods that refer to 'this' directly or indirectly via references to other methods
     // for each method found add it to the referrers set
     private def refersToThis(symbol: Symbol): Boolean = {
-      var seen = mutable.Set[Symbol]()
+      val seen = mutable.Set[Symbol]()
       def loop(symbol: Symbol): Boolean = {
         if (seen(symbol)) false
         else {
           seen += symbol
           (thisReferringMethods contains symbol) ||
-            (liftedMethodReferences(symbol) exists loop) && {
+            (liftedMethodReferences.contains(symbol) && liftedMethodReferences(symbol).exists(loop)) && {
               // add it early to memoize
               debuglog(s"$symbol indirectly refers to 'this'")
               thisReferringMethods += symbol
@@ -367,22 +395,24 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
     private var currentMethod: Symbol = NoSymbol
 
     override def traverse(tree: Tree) = tree match {
+      case _: DefDef if tree.symbol.hasFlag(SYNCHRONIZED) =>
+        thisReferringMethods add tree.symbol
       case DefDef(_, _, _, _, _, _) if tree.symbol.isDelambdafyTarget || tree.symbol.isLiftedMethod =>
         // we don't expect defs within defs. At this phase trees should be very flat
         if (currentMethod.exists) devWarning("Found a def within a def at a phase where defs are expected to be flattened out.")
         currentMethod = tree.symbol
-        super.traverse(tree)
+        tree.traverse(this)
         currentMethod = NoSymbol
       case fun@Function(_, _) =>
         // we don't drill into functions because at the beginning of this phase they will always refer to 'this'.
         // They'll be of the form {(args...) => this.anonfun(args...)}
         // but we do need to make note of the lifted body method in case it refers to 'this'
-        if (currentMethod.exists) liftedMethodReferences(currentMethod) += targetMethod(fun)
+        if (currentMethod.exists) liftedMethodReferences.getOrElseUpdate(currentMethod, mutable.Set()) += targetMethod(fun)
       case Apply(sel @ Select(This(_), _), args) if sel.symbol.isLiftedMethod =>
-        if (currentMethod.exists) liftedMethodReferences(currentMethod) += sel.symbol
+        if (currentMethod.exists) liftedMethodReferences.getOrElseUpdate(currentMethod, mutable.Set()) += sel.symbol
         super.traverseTrees(args)
       case Apply(fun, outer :: rest) if shouldElideOuterArg(fun.symbol, outer) =>
-        super.traverse(fun)
+        fun.traverse(this)
         super.traverseTrees(rest)
       case This(_) =>
         if (currentMethod.exists && tree.symbol == currentMethod.enclClass) {
@@ -392,7 +422,7 @@ abstract class Delambdafy extends Transform with TypingTransformers with ast.Tre
       case _: ClassDef if !tree.symbol.isTopLevel =>
       case _: DefDef =>
       case _ =>
-        super.traverse(tree)
+        tree.traverse(this)
     }
   }
 }

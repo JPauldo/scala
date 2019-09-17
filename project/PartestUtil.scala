@@ -10,7 +10,7 @@ object PartestUtil {
     private def testCaseFinder = (testBase / srcPath).*(AllPassFilter).*(testCaseFilter)
     private val basePaths = allTestCases.map(_._2.split('/').take(3).mkString("/") + "/").distinct
 
-    def allTestCases = testCaseFinder.pair(relativeTo(globalBase))
+    def allTestCases = testCaseFinder.pair(io.Path.relativeTo(globalBase))
     def basePathExamples = new FixedSetExamples(basePaths)
     private def equiv(f1: File, f2: File) = f1.getCanonicalFile == f2.getCanonicalFile
     def parentChain(f: File): Iterator[File] =
@@ -26,12 +26,16 @@ object PartestUtil {
       isParentOf(testBase / srcPath, f, 2) || isParentOf(f, testBase / srcPath, Int.MaxValue)
     }
   }
+
+  def testFilePaths(globalBase: File, testBase: File): Seq[java.io.File] =
+    (new TestFiles("files", globalBase, testBase)).allTestCases.map(_._1)
+
   /** A parser for the custom `partest` command */
   def partestParser(globalBase: File, testBase: File): Parser[String] = {
     val knownUnaryOptions = List(
       "--pos", "--neg", "--run", "--jvm", "--res", "--ant", "--scalap", "--specialized",
-      "--instrumented", "--presentation", "--failed", "--update-check",
-      "--show-diff", "--show-log", "--verbose", "--terse", "--debug", "--version", "--self-test", "--help")
+      "--instrumented", "--presentation", "--failed", "--update-check", "--no-exec",
+      "--show-diff", "--show-log", "--verbose", "--terse", "--debug", "--version", "--help")
     val srcPathOption = "--srcpath"
     val grepOption = "--grep"
 
@@ -83,7 +87,7 @@ object PartestUtil {
       token(grepOption <~ Space) ~> token(globOrPattern, tokenCompletion)
     }
 
-    val SrcPath = ((token(srcPathOption) <~ Space) ~ token(StringBasic.examples(Set("files", "pending", "scaladoc")))) map {
+    val SrcPath = ((token(srcPathOption) <~ Space) ~ token(StringBasic.examples(Set("files", "scaladoc")))) map {
       case opt ~ path =>
         srcPath = path
         opt + " " + path

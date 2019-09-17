@@ -1,7 +1,13 @@
-/* scaladoc, a documentation generator for Scala
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
- * @author  Geoffrey Washburn
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -20,7 +26,7 @@ class ScalaDoc {
   def process(args: Array[String]): Boolean = {
     var reporter: ScalaDocReporter = null
     val docSettings = new doc.Settings(msg => reporter.error(FakePos("scaladoc"), msg + "\n  scaladoc -help  gives more information"),
-                                       msg => reporter.printMessage(msg))
+                                       msg => reporter.echo(msg))
     reporter = new ScalaDocReporter(docSettings)
     val command = new ScalaDoc.Command(args.toList, docSettings)
     def hasFiles = command.files.nonEmpty || docSettings.uncompilableFiles.nonEmpty
@@ -44,7 +50,7 @@ class ScalaDoc {
           if (docSettings.debug.value) ex.printStackTrace()
           reporter.error(null, "fatal error: " + msg)
       }
-      finally reporter.printSummary()
+      finally reporter.finish()
 
     !reporter.reallyHasErrors
   }
@@ -72,9 +78,9 @@ class ScalaDocReporter(settings: Settings) extends ConsoleReporter(settings) {
 
   def printDelayedMessages(): Unit = delayedMessages.values.foreach(_.apply())
 
-  override def printSummary(): Unit = {
+  override def finish(): Unit = {
     printDelayedMessages()
-    super.printSummary()
+    super.finish()
   }
 }
 
@@ -82,14 +88,14 @@ object ScalaDoc extends ScalaDoc {
   class Command(arguments: List[String], settings: doc.Settings) extends CompilerCommand(arguments, settings) {
     override def cmdName = "scaladoc"
     override def usageMsg = (
-      createUsageMsg("where possible scaladoc", shouldExplain = false, x => x.isStandard && settings.isScaladocSpecific(x.name)) +
+      createUsageMsg("where possible scaladoc", explain = false)(x => x.isStandard && settings.isScaladocSpecific(x.name)) +
       "\n\nStandard scalac options also available:" +
-      createUsageMsg(x => x.isStandard && !settings.isScaladocSpecific(x.name))
+      optionsMessage(x => x.isStandard && !settings.isScaladocSpecific(x.name))
     )
   }
 
-  def main(args: Array[String]): Unit = sys exit {
-    if (process(args)) 0 else 1
+  def main(args: Array[String]): Unit = {
+    System.exit(if (process(args)) 0 else 1)
   }
 
   implicit class SummaryReporter(val rep: Reporter) extends AnyVal {

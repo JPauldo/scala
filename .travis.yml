@@ -1,28 +1,93 @@
-# opt-in to Travis's newer/faster container-based infrastructure
-sudo: false
+dist: xenial
+group: stable
+language: scala
 
-# this builds the spec using jekyll
-# based on http://www.paperplanes.de/2013/8/13/deploying-your-jekyll-blog-to-s3-with-travis-ci.html
-language: ruby
-rvm:
-  - 2.2
-script: bundle exec jekyll build -s spec/ -d build/spec
-install: bundle install
+before_install:
+  # adding $HOME/.sdkman to cache would create an empty directory, which interferes with the initial installation
+  - "[[ -d $HOME/.sdkman/bin/ ]] || rm -rf $HOME/.sdkman/"
+  - curl -sL https://get.sdkman.io | bash
+  - echo sdkman_auto_answer=true > $HOME/.sdkman/etc/config
+  - source "$HOME/.sdkman/bin/sdkman-init.sh"
 
-# cat /dev/urandom | head -c 10000 | openssl sha1 > ./secret
-# openssl aes-256-cbc -pass "file:./secret" -in id_dsa_spec212_b4096 -out spec/id_dsa_travis.enc -a
-# travis encrypt "PRIV_KEY_SECRET=`cat ./secret`"
+install:
+  - sdk install java $(sdk list java | grep -o "$ADOPTOPENJDK\.[0-9\.]*hs-adpt" | head -1)
+  - unset JAVA_HOME
+  - java -Xmx32m -version
+  - javac -J-Xmx32m -version
+
+stages:
+  - name: build
+
+jobs:
+    include:
+
+      # full bootstrap and publish
+      - stage: build
+        if: type != pull_request
+        script:
+          # see comment in `bootstrap_fun` for details on the procedure
+          # env available in each stage
+          #  - by travis config (see below): secret env vars
+          #  - by `common` script: WORKSPACE, IVY2_DIR, SBT_CMD, integrationRepoUrl
+          #  - by `bootstrap_fun`: publishPrivateTask, ...
+          - set -e
+          - (cd admin && ./init.sh)
+          - source scripts/common
+          - source scripts/bootstrap_fun
+          - determineScalaVersion
+          - removeExistingBuilds $integrationRepoUrl
+          - if [ ! -z "$STARR_REF" ]; then buildStarr; fi
+          - buildLocker
+          - buildQuick
+          - triggerScalaDist
+          - sbt -Dscala.build.compileWithDotty=true library/compile
+
+      # pull request validation (w/ mini-bootstrap)
+      - stage: build
+        name: "JDK 8 pr validation"
+        if: type = pull_request
+        script:
+          - set -e
+          - sbt -warn setupPublishCore generateBuildCharacterPropertiesFile headerCheck publishLocal
+          - STARR=`cat buildcharacter.properties | grep ^maven.version.number | cut -d= -f2` && echo $STARR
+          - sbt -Dstarr.version=$STARR -warn setupValidateTest test:compile info testAll
+          - sbt -Dscala.build.compileWithDotty=true library/compile
+
+      # build the spec using jekyll
+      - stage: build
+        language: ruby
+        install:
+          - ruby -v
+          - gem install bundler
+          - bundler --version
+          - bundle install
+        script:
+          - set -e
+          - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then (cd admin && ./init.sh); fi'
+          - bundle exec jekyll build -s spec/ -d build/spec
+        after_success:
+          - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./scripts/travis-publish-spec.sh; fi'
+
 env:
-  - secure: "TuJOUtALynPd+MV1AuMeIpVb8BUBHr7Ul7FS48XhS2PyuTRpEBkSWybYcNg3AXyzmWDAuOjUxbaNMQBvP8vvehTbIYls5H5wTGKvj0D0TNVaPIXjF8bA8KyNat9xGNzhnWm2/2BMaWpKBJWRF7Jb+zHhijMYCJEbkMtoiE5R/mY="
+  global:
+    - ADOPTOPENJDK=8
+    - secure: "P8EqpZoin/YTnwel9TTxSSAHtXfZ4M262BKXlYUZmjoQsjyvXDAeZ7yAqgAvX5BeRFrGkBToPiE+V60stdWkPKs3+9COw2BDUB1CULBHhRY9Lxordmz0xVhgEfsoH4f6r6wOlIQ9kuaWhmP+JdB/mzOHZhLch9ziPi8O46Z8t4k=" # PRIV_KEY_SECRET, for scripts/travis-publish-spec.sh
+    - secure: "T1fxtvLTxioyXJYiC/zVYdNYsBOt+0Piw+xE04rB1pzeKahm9+G2mISdcAyqv6/vze9eIJt6jNHHpKX32/Z3Cs1/Ruha4m3k+jblj3S0SbxV6ht2ieJXLT5WoUPFRrU68KXI8wqUadXpjxeJJV53qF2FC4lhfMUsw1IwwMhdaE8=" # PRIVATE_REPO_PASS
+    - secure: "feE5A8mYNpkNQKVwCj3aXrwjVrJWh/4ENpRfFlr2HOD9ORk1GORD5Yq907WZd+dTkYK54Lh1gA+qHOCIDgJHbi9ZLU+kjzEjtYKF6lQy6Wb0LI8smTOnAA6IWVVYifiXw8d66MI2MKZb2jjGeIzy8Q00SZjLhEGjLyTeCIB88Ws=" # SONA_USER
+    - secure: "ek3As5q2tL8UBXcxSBbv4v5YgsoPD41SCzPOSu72kzfbngyxgQxrcziU5pIM+Lib9KaWex7hVVWNL38tMyDbu+0OpDv8bPjMujzlDx5I2pJUfuOJo7QRYsJE1nsXcY4cA72cCLfbRcLEkvtDAhcdLSaUOqlyQe5BY4X4fY5eoPA=" # SONA_PASS
+    - secure: "dbAvl6KEuLwZ0MVQPZihFsPzCdiLbX0EFk3so+hcfEbksrmLQ1tn4X5ZM7Wy1UDR8uN9lxngEwHch7a7lKqpugzmXMew9Wnikr9WBWbJT77Z+XJ/jHI6YuiCRpRo+nvxXGp9Ry80tSIgx5eju0J83IaJL41BWlBkvyAd7YAHORI=" # GPG_SUBKEY_SECRET
+    - secure: "ee0z/1jehBjFa2M2JlBHRjeo6OEn/zmVl72ukBP1ISeKqz18Cswc4gDI5tV9RW9SlYFLkIlGsR2qnRCyJ/pqgQLcNdrpsCRFFc79oyLhfEtmPdAHlWfj4RSP68zINRtDdFuJ8iSy8XYP0NaqpVIYpkNdv9I6q7N85ljmMQpHO+U=" # TRAVIS_TOKEN (login with GitHub as lrytz)
 
-# ^^^ set PRIV_KEY_SECRET to password used to encrypt spec/id_dsa_travis.enc
+before_cache:
+  # Cleanup the cached directories to avoid unnecessary cache updates
+  - find $HOME/.ivy2/cache -name "ivydata-*.properties" -print -delete
+  - find $HOME/.sbt        -name "*.lock"               -print -delete
+cache:
+  directories:
+    - $HOME/.ivy2/cache
+    - $HOME/.sbt
+    - $HOME/.rvm/
+    - $HOME/.sdkman
 
-# the key is restricted using forced commands so that it can only upload to the directory we need here
-after_success:
-  - openssl aes-256-cbc -pass "pass:$PRIV_KEY_SECRET" -in spec/id_dsa_travis.enc -out spec/id_dsa_travis -d -a
-  - chmod 600 spec/id_dsa_travis
-  - eval "$(ssh-agent)"
-  - '[ "${TRAVIS_PULL_REQUEST}" = "false" ] && ssh-add -D && ssh-add spec/id_dsa_travis && rsync -e "ssh -o StrictHostKeyChecking=no" -rzv build/spec/ scalatest@chara.epfl.ch:/home/linuxsoft/archives/scala/spec/2.12/'
-
-# using S3 would be simpler, but we want to upload to scala-lang.org
-# after_success: bundle exec s3_website push --headless
+notifications:
+  webhooks: https://scala-ci.typesafe.com/benchq/webhooks/travis

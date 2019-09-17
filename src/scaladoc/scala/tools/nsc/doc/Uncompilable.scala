@@ -1,12 +1,18 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
 package doc
 import scala.language.implicitConversions
-import scala.language.postfixOps
 
 /** Some glue between DocParser (which reads source files which can't be compiled)
  *  and the scaladoc model.
@@ -24,7 +30,7 @@ trait Uncompilable {
 
   def docSymbol(p: DocParser.Parsed) = p.nameChain.foldLeft(RootClass: Symbol)(_.tpe member _)
   def docDefs(code: String)          = new DocParser(settings, reporter) docDefs code
-  def docPairs(code: String)         = docDefs(code) map (p => (docSymbol(p), new DocComment(p.raw)))
+  def docPairs(code: String)         = docDefs(code) map (p => (docSymbol(p), DocComment(p.raw)))
 
   lazy val pairs = files flatMap { f =>
     val comments = docPairs(f.slurp())
@@ -35,7 +41,7 @@ trait Uncompilable {
   }
   def files     = settings.uncompilableFiles
   def symbols   = pairs map (_._1)
-  def templates = symbols filter (x => x.isClass || x.isTrait || x == AnyRefClass/* which is now a type alias */) toSet
+  def templates = symbols.filter(x => x.isClass || x.isTrait || x == AnyRefClass/* which is now a type alias */).toSet
   def comments = {
     if (settings.debug || settings.verbose)
       inform("Found %d uncompilable files: %s".format(files.size, files mkString ", "))

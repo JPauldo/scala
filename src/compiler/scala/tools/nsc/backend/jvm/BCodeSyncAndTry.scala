@@ -1,8 +1,14 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2012 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
-
 
 package scala
 package tools.nsc
@@ -15,7 +21,6 @@ import scala.tools.asm
 /*
  *
  *  @author  Miguel Garcia, http://lamp.epfl.ch/~magarcia/ScalaCompilerCornerReloaded/
- *  @version 1.0
  *
  */
 abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
@@ -26,7 +31,7 @@ abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
   /*
    * Functionality to lower `synchronized` and `try` expressions.
    */
-  abstract class SyncAndTryBuilder(cunit: CompilationUnit) extends PlainBodyBuilder(cunit) {
+  class SyncAndTryBuilder(cunit: CompilationUnit) extends PlainBodyBuilder(cunit) {
 
     def genSynchronized(tree: Apply, expectedType: BType): BType = {
       val Apply(fun, args) = tree
@@ -74,7 +79,7 @@ abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
        *            Reached upon abrupt termination of (2).
        *            Protected by whatever protects the whole synchronized expression.
        *            null => "any" exception in bytecode, like we emit for finally.
-       *            Important not to use j/l/Throwable which dooms the method to a life of interpretation! (SD-233)
+       *            Important not to use j/l/Throwable which dooms the method to a life of interpretation! (scala/scala-dev#233)
        * ------
        */
       protect(startProtected, endProtected, currProgramPoint(), null)
@@ -109,9 +114,9 @@ abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
     /*
      *  Detects whether no instructions have been emitted since label `lbl` and if so emits a NOP.
      *  Useful to avoid emitting an empty try-block being protected by exception handlers,
-     *  which results in "java.lang.ClassFormatError: Illegal exception table range". See SI-6102.
+     *  which results in "java.lang.ClassFormatError: Illegal exception table range". See scala/bug#6102.
      */
-    def nopIfNeeded(lbl: asm.Label) {
+    def nopIfNeeded(lbl: asm.Label): Unit = {
       val noInstructionEmitted = isAtProgramPoint(lbl)
       if (noInstructionEmitted) { emit(asm.Opcodes.NOP) }
     }
@@ -144,7 +149,7 @@ abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
      *             A try-clause may contain an empty block. On CLR, a finally-block has special semantics
      *             regarding Abort interruptions; but on the JVM it's safe to elide an exception-handler
      *             that protects an "empty" range ("empty" as in "containing NOPs only",
-     *             see `asm.optimiz.DanglingExcHandlers` and SI-6720).
+     *             see `asm.optimiz.DanglingExcHandlers` and scala/bug#6720).
      *
      *        This means a finally-block indicates instructions that can be reached:
      *          (b.1) Upon normal (non-early-returning) completion of the try-clause or a catch-clause
@@ -370,7 +375,7 @@ abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
     } // end of genLoadTry()
 
     /* if no more pending cleanups, all that remains to do is return. Otherwise jump to the next (outer) pending cleanup. */
-    private def pendingCleanups() {
+    private def pendingCleanups(): Unit = {
       cleanups match {
         case Nil =>
           if (earlyReturnVar != null) {
@@ -386,7 +391,7 @@ abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
       }
     }
 
-    def protect(start: asm.Label, end: asm.Label, handler: asm.Label, excType: ClassBType) {
+    def protect(start: asm.Label, end: asm.Label, handler: asm.Label, excType: ClassBType): Unit = {
       val excInternalName: String =
         if (excType == null) null
         else excType.internalName
@@ -395,11 +400,11 @@ abstract class BCodeSyncAndTry extends BCodeBodyBuilder {
     }
 
     /* `tmp` (if non-null) is the symbol of the local-var used to preserve the result of the try-body, see `guardResult` */
-    def emitFinalizer(finalizer: Tree, tmp: Symbol, isDuplicate: Boolean) {
+    def emitFinalizer(finalizer: Tree, tmp: Symbol, isDuplicate: Boolean): Unit = {
       var saved: immutable.Map[ /* LabelDef */ Symbol, asm.Label ] = null
       if (isDuplicate) {
         saved = jumpDest
-        for(ldef <- labelDefsAtOrUnder(finalizer)) {
+        for(ldef <- labelDefsAtOrUnder.getOrElse(finalizer, Nil)) {
           jumpDest -= ldef.symbol
         }
       }

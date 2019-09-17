@@ -1,12 +1,20 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2014 LAMP/EPFL, Typesafe Inc.
- * @author  Adriaan Moors
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala
 package reflect
 package internal
 
+import scala.annotation.unchecked.uncheckedStable
 import settings.MutableSettings
 
 /** Provides delegates to the reporter doing the actual work.
@@ -73,34 +81,58 @@ import util.Position
 
 /** Report information, warnings and errors.
  *
- *  This describes the (future) external interface for issuing information, warnings and errors.
- *  Currently, scala.tools.nsc.Reporter is used by sbt/ide/partest.
+ *  This describes the internal interface for issuing information, warnings and errors.
+ *  Implementers of scala.tools.nsc.Reporter such as sbt/ide must define info0.
+ *  Implementers of scala.tools.nsc.FilteringReporter must define its extension point doReport.
  */
 abstract class Reporter {
+  private[this] var _errorCount = 0
+  private[this] var _warningCount = 0
+
+  // sbt source compatibility
+  final type Severity = Reporter.Severity
+  @uncheckedStable final def INFO: Severity    = Reporter.INFO
+  @uncheckedStable final def WARNING: Severity = Reporter.WARNING
+  @uncheckedStable final def ERROR: Severity   = Reporter.ERROR
+
+  // TODO: rename to `doReport`, remove the `force` parameter.
+  // Note: `force` is ignored. It used to mean: if `!force`, the reporter may skip INFO messages.
+  // If `force`, INFO messages were always printed. Now, INFO messages are always printed.
   protected def info0(pos: Position, msg: String, severity: Severity, force: Boolean): Unit
 
-  def echo(pos: Position, msg: String): Unit    = info0(pos, msg, INFO, force = true)
-  def warning(pos: Position, msg: String): Unit = info0(pos, msg, WARNING, force = false)
-  def error(pos: Position, msg: String): Unit   = info0(pos, msg, ERROR, force = false)
+  /** Return
+    *   - 0: count and display
+    *   - 1: count only, don't display
+    *   - 2: don't count, don't display
+    */
+  def filter(pos: Position, msg: String, severity: Severity): Int = 0
 
-  type Severity
-  val INFO: Severity
-  val WARNING: Severity
-  val ERROR: Severity
+  final def echo(msg: String): Unit                   = echo(util.NoPosition, msg)
+  final def echo(pos: Position, msg: String): Unit    = if (filter(pos, msg, INFO) == 0) info0(pos, msg, INFO, force = true)
+  final def warning(pos: Position, msg: String): Unit = filteredInfo(pos, msg, WARNING)
+  final def error(pos: Position, msg: String): Unit   = filteredInfo(pos, msg, ERROR)
 
-  def count(severity: Severity): Int
-  def resetCount(severity: Severity): Unit
+  private def filteredInfo(pos: Position, msg: String, severity: Severity): Unit = {
+    val f = filter(pos, msg, severity)
+    if (f <= 1) increment(severity)
+    if (f == 0) info0(pos, msg, severity, force = false)
+  }
 
-  def errorCount: Int   = count(ERROR)
-  def warningCount: Int = count(WARNING)
+  def increment(severity: Severity): Unit = severity match {
+    case _: Reporter.ERROR.type   => _errorCount += 1
+    case _: Reporter.WARNING.type => _warningCount += 1
+    case _ =>
+  }
 
-  def hasErrors: Boolean   = count(ERROR) > 0
-  def hasWarnings: Boolean = count(WARNING) > 0
+  def errorCount: Int   = _errorCount
+  def warningCount: Int = _warningCount
+
+  def hasErrors: Boolean   = errorCount > 0
+  def hasWarnings: Boolean = warningCount > 0
 
   def reset(): Unit = {
-    resetCount(INFO)
-    resetCount(WARNING)
-    resetCount(ERROR)
+    _errorCount = 0
+    _warningCount = 0
   }
 
   def flush(): Unit = ()
@@ -108,7 +140,9 @@ abstract class Reporter {
   /** Finish reporting: print summaries, release resources. */
   def finish(): Unit = ()
 
-  /** After reporting, offer advice on getting more details. */
+  /** After reporting, offer advice on getting more details.
+    * Does not access `this`, but not static because it's overridden in ReplReporterImpl.
+    */
   def rerunWithDetails(setting: MutableSettings#Setting, name: String): String =
     setting.value match {
       case b: Boolean if !b => s"; re-run with ${name} for details"
@@ -116,13 +150,9 @@ abstract class Reporter {
     }
 }
 
-// TODO: move into superclass once partest cuts tie on Severity
-abstract class ReporterImpl extends Reporter {
-  class Severity(val id: Int)(name: String) { var count: Int = 0 ; override def toString = name}
-  object INFO    extends Severity(0)("INFO")
-  object WARNING extends Severity(1)("WARNING")
-  object ERROR   extends Severity(2)("ERROR")
-
-  def count(severity: Severity): Int       = severity.count
-  def resetCount(severity: Severity): Unit = severity.count = 0
+object Reporter {
+  sealed class Severity(val id: Int, override val toString: String)
+  object INFO    extends Severity(0, "INFO")
+  object WARNING extends Severity(1, "WARNING")
+  object ERROR   extends Severity(2, "ERROR")
 }

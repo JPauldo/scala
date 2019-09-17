@@ -87,10 +87,12 @@ that value.
 ```
 
 A _pattern binder_ `$x$@$p$` consists of a pattern variable $x$ and a
-pattern $p$. The type of the variable $x$ is the static type $T$ of the pattern $p$.
+pattern $p$. The type of the variable $x$ is the static type $T$ implied
+by the pattern $p$.
 This pattern matches any value $v$ matched by the pattern $p$,
-provided the run-time type of $v$ is also an instance of $T$,
 and it binds the variable name to that value.
+
+A pattern $p$ _implies_ a type $T$ if the pattern matches only values of the type $T$.
 
 ### Literal Patterns
 
@@ -101,6 +103,54 @@ and it binds the variable name to that value.
 A _literal pattern_ $L$ matches any value that is equal (in terms of
 `==`) to the literal $L$. The type of $L$ must conform to the
 expected type of the pattern.
+
+### Interpolated string patterns
+
+```ebnf
+  Literal  ::=  interpolatedString
+```
+
+The expansion of interpolated string literals in patterns is the same as 
+in expressions. If it occurs in a pattern, a interpolated string literal 
+of either of the forms
+```
+id"text0{ pat1 }text1 … { patn }textn"
+id"""text0{ pat1 }text1 … { patn }textn"""
+```
+is equivalent to:
+```
+StringContext("""text0""", …, """textn""").id(pat1, …, patn)
+```
+You could define your own `StringContext` to shadow the default one that's 
+in the `scala` package.
+
+This expansion is well-typed if the member `id` evaluates to an extractor 
+object. If the extractor object has `apply` as well as `unapply` or 
+`unapplySeq` methods, processed strings can be used as either expressions
+or patterns.
+
+Taking XML as an example
+```scala
+implicit class XMLinterpolation(s: StringContext) = {
+    object xml {
+        def apply(exprs: Any*) =
+            // parse ‘s’ and build an XML tree with ‘exprs’ 
+            //in the holes
+        def unapplySeq(xml: Node): Option[Seq[Node]] =
+          // match `s’ against `xml’ tree and produce 
+          //subtrees in holes
+    }
+}
+```
+Then, XML pattern matching could be expressed like this:
+```scala
+case xml"""
+      <body>
+        <a href = "some link"> \$linktext </a>
+      </body>
+     """ => ...
+```
+where linktext is a variable bound by the pattern.
 
 ### Stable Identifier Patterns
 
@@ -190,9 +240,12 @@ a case class, the stable identifier $x$ denotes an object which has a
 member method named `unapply` or `unapplySeq` that matches
 the pattern.
 
+An extractor pattern cannot match the value `null`. The implementation
+ensures that the `unapply`/`unapplySeq` method is not applied to `null`.
+
 An `unapply` method in an object $x$ _matches_ the pattern
-$x(p_1 , \ldots , p_n)$ if it takes exactly one argument and one of
-the following applies:
+$x(p_1 , \ldots , p_n)$ if it has a single parameter (and, optionally, an
+implicit parameter list) and one of the following applies:
 
 * $n=0$ and `unapply`'s result type is `Boolean`. In this case
   the extractor pattern matches all values $v$ for which
@@ -217,8 +270,8 @@ and its result type is of the form `Option[($T_1 , \ldots , T_m$, Seq[S])]` (if 
 This case is further discussed [below](#pattern-sequences).
 
 ###### Example
-The `Predef` object contains a definition of an
-extractor object `Pair`:
+
+If we define an extractor object `Pair`:
 
 ```scala
 object Pair {
@@ -339,9 +392,13 @@ A type pattern $T$ is of one of the following  forms:
   be used as type patterns, because they would match nothing in any case.
 
 * A singleton type `$p$.type`. This type pattern matches only the value
-  denoted by the path $p$ (that is, a pattern match involved a
-  comparison of the matched value with $p$ using method `eq` in class
-  `AnyRef`).
+  denoted by the path $p$ (the `eq` method is used to compare the matched value
+  to $p$).
+
+* A literal type `$lit$`. This type pattern matches only the value
+  denoted by the literal $lit$ (the `==` method is used to compare the matched
+  value to $lit$).
+
 * A compound type pattern `$T_1$ with $\ldots$ with $T_n$` where each $T_i$ is a
   type pattern. This type pattern matches all values that are matched by each of
   the type patterns $T_i$.

@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -16,17 +23,15 @@ import scala.reflect.runtime.{universe => ru}
  */
 abstract class ReplVals { }
 
-class StdReplVals(final val r: ILoop) extends ReplVals {
-  final lazy val repl                     = r
-  final lazy val intp                     = r.intp
-  final lazy val power                    = r.power
-  final lazy val reader                   = r.in
-  final lazy val vals                     = this
-  final lazy val global: intp.global.type = intp.global
-  final lazy val isettings                = intp.isettings
-  final lazy val completion               = reader.completion
-  final lazy val history                  = reader.history
+class StdReplVals(final val intp: IMain) extends ReplVals {
+  // TODO bring back access to shell features from the interpreter?
+  // The repl backend has now cut its ties to the shell, except for the ReplReporter interface
+  // Before, we gave the user access to: repl, reader, isettings (poor name), completion and history.
+  // We could bring back some of this functionality if desired by adding it to ReplReporter
+  final val vals                          = this
+  final lazy val power                    = intp.power
   final lazy val phased                   = power.phased
+  final lazy val global: intp.global.type = intp.global
   final lazy val analyzer                 = global.analyzer
 
   object treedsl extends { val global: intp.global.type = intp.global } with ast.TreeDSL { }

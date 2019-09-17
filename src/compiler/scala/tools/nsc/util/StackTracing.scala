@@ -1,5 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc.util
@@ -9,7 +17,7 @@ private[util] trait StackTracing extends Any {
   /** Format a stack trace, returning the prefix consisting of frames that satisfy
    *  a given predicate.
    *  The format is similar to the typical case described in the Javadoc
-   *  for [[java.lang.Throwable#printStackTrace]].
+   *  for [[java.lang.Throwable#printStackTrace()*]].
    *  If a stack trace is truncated, it will be followed by a line of the form
    *  `... 3 elided`, by analogy to the lines `... 3 more` which indicate
    *  shared stack trace segments.
@@ -18,7 +26,7 @@ private[util] trait StackTracing extends Any {
    */
   def stackTracePrefixString(e: Throwable)(p: StackTraceElement => Boolean): String = {
     import collection.mutable.{ ArrayBuffer, ListBuffer }
-    import compat.Platform.EOL
+    import java.lang.System.{lineSeparator => EOL}
 
     type TraceRelation = String
     val Self       = new TraceRelation("")
@@ -51,11 +59,10 @@ private[util] trait StackTracing extends Any {
       }
       val prefix = frames takeWhile p
       val margin = "  " * indents
-      val indent = margin + "  "
-      sb append s"${margin}${r}${header(e)}"
-      prefix foreach (f => sb append s"${margin}  at $f")
-      if (frames.size < trace.size) sb append s"${margin}  ... ${trace.size - frames.size} more"
-      if (r == Self && prefix.size < frames.size) sb append s"${margin}  ... ${frames.size - prefix.size} elided"
+      sb += s"${margin}${r}${header(e)}"
+      prefix foreach (f => sb += s"${margin}  at $f")
+      if (frames.size < trace.size) sb += s"${margin}  ... ${trace.size - frames.size} more"
+      if (r == Self && prefix.size < frames.size) sb += s"${margin}  ... ${frames.size - prefix.size} elided"
       print(e.getCause, CausedBy, trace, indents)
       e.getSuppressed foreach (t => print(t, Suppressed, frames, indents + 1))
     }

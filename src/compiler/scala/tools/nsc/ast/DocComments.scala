@@ -1,18 +1,25 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
 package ast
 
+import scala.annotation.tailrec
 import symtab._
 import util.DocStrings._
 import scala.collection.mutable
 
 /*
  *  @author  Martin Odersky
- *  @version 1.0
  */
 trait DocComments { self: Global =>
 
@@ -27,7 +34,7 @@ trait DocComments { self: Global =>
    */
   val docComments = mutable.WeakHashMap[Symbol, DocComment]()
 
-  def clearDocComments() {
+  def clearDocComments(): Unit = {
     cookedDocComments.clear()
     docComments.clear()
     defs.clear()
@@ -54,7 +61,7 @@ trait DocComments { self: Global =>
     else sym.owner.ancestors map (sym overriddenSymbol _) filter (_ != NoSymbol)
   }
 
-  def fillDocComment(sym: Symbol, comment: DocComment) {
+  def fillDocComment(sym: Symbol, comment: DocComment): Unit = {
     docComments(sym) = comment
     comment.defineVariables(sym)
   }
@@ -70,13 +77,14 @@ trait DocComments { self: Global =>
    *  the doc comment of the overridden version is copied instead.
    */
   def cookedDocComment(sym: Symbol, docStr: String = ""): String = cookedDocComments.getOrElseUpdate(sym, {
-    var ownComment = if (docStr.length == 0) docComments get sym map (_.template) getOrElse ""
-                       else DocComment(docStr).template
-    ownComment = replaceInheritDocToInheritdoc(ownComment)
+    val ownComment = replaceInheritDocToInheritdoc {
+      if (docStr.length == 0) docComments get sym map (_.template) getOrElse ""
+      else DocComment(docStr).template
+    }
 
     superComment(sym) match {
       case None =>
-        // SI-8210 - The warning would be false negative when this symbol is a setter
+        // scala/bug#8210 - The warning would be false negative when this symbol is a setter
         if (ownComment.indexOf("@inheritdoc") != -1 && ! sym.isSetter)
           reporter.warning(sym.pos, s"The comment for ${sym} contains @inheritdoc, but no parent comment is available to inherit from.")
         ownComment.replaceAllLiterally("@inheritdoc", "<invalid inheritdoc annotation>")
@@ -133,8 +141,12 @@ trait DocComments { self: Global =>
     mapFind(sym :: allInheritedOverriddenSymbols(sym))(docComments get _)
 
   /** The cooked doc comment of an overridden symbol */
-  protected def superComment(sym: Symbol): Option[String] =
-    allInheritedOverriddenSymbols(sym).iterator map (x => cookedDocComment(x)) find (_ != "")
+  protected def superComment(sym: Symbol): Option[String] = {
+    val getter: Symbol = sym.getter
+    allInheritedOverriddenSymbols(getter.orElse(sym)).iterator
+      .map(cookedDocComment(_))
+      .find(_ != "")
+  }
 
   private def mapFind[A, B](xs: Iterable[A])(f: A => Option[B]): Option[B] =
     xs collectFirst scala.Function.unlift(f)
@@ -249,8 +261,8 @@ trait DocComments { self: Global =>
               val sectionTextBounds = extractSectionText(parent, section)
               cleanupSectionText(parent.substring(sectionTextBounds._1, sectionTextBounds._2))
             case None =>
-              reporter.info(sym.pos, "The \"" + getSectionHeader + "\" annotation of the " + sym +
-                  " comment contains @inheritdoc, but the corresponding section in the parent is not defined.", force = true)
+              reporter.echo(sym.pos, "The \"" + getSectionHeader + "\" annotation of the " + sym +
+                  " comment contains @inheritdoc, but the corresponding section in the parent is not defined.")
               "<invalid inheritdoc annotation>"
           }
 
@@ -290,7 +302,8 @@ trait DocComments { self: Global =>
    *  @param vble  The variable for which a definition is searched
    *  @param site  The class for which doc comments are generated
    */
-  def lookupVariable(vble: String, site: Symbol): Option[String] = site match {
+  @tailrec
+  final def lookupVariable(vble: String, site: Symbol): Option[String] = site match {
     case NoSymbol => None
     case _        =>
       val searchList =
@@ -299,7 +312,8 @@ trait DocComments { self: Global =>
 
       searchList collectFirst { case x if defs(x) contains vble => defs(x)(vble) } match {
         case Some(str) if str startsWith "$" => lookupVariable(str.tail, site)
-        case res                             => res orElse lookupVariable(vble, site.owner)
+        case s @ Some(str)                   => s
+        case None                            => lookupVariable(vble, site.owner)
       }
   }
 
@@ -314,6 +328,7 @@ trait DocComments { self: Global =>
   protected def expandVariables(initialStr: String, sym: Symbol, site: Symbol): String = {
     val expandLimit = 10
 
+    @tailrec
     def expandInternal(str: String, depth: Int): String = {
       if (depth >= expandLimit)
         throw new ExpansionLimitExceeded(str)
@@ -329,7 +344,7 @@ trait DocComments { self: Global =>
         else {
           val vstart = idx
           idx = skipVariable(str, idx + 1)
-          def replaceWith(repl: String) {
+          def replaceWith(repl: String): Unit = {
             out append str.substring(copied, vstart)
             out append repl
             copied = idx
@@ -395,6 +410,8 @@ trait DocComments { self: Global =>
       val commentStart = skipLineLead(raw, codeEnd + 1) min end
       val comment      = "/** " + raw.substring(commentStart, end) + "*/"
       val commentPos   = subPos(commentStart, end)
+
+      self.currentRun.reporting.deprecationWarning(codePos, "The @usecase tag is deprecated, instead use the @example tag to document the usage of your API", "2.13.0")
 
       UseCase(DocComment(comment, commentPos, codePos), code, codePos)
     }
@@ -476,7 +493,7 @@ trait DocComments { self: Global =>
           case _ =>
             (getSite(partnames.head), partnames.tail)
         }
-        val result = (start /: rest)(select(_, _, NoType))
+        val result = rest.foldLeft(start)(select(_, _, NoType))
         if (result == NoType)
           reporter.warning(comment.codePos, "Could not find the type " + variable + " points to while expanding it " +
                                             "for the usecase signature of " + sym + " in " + site + "." +
@@ -514,6 +531,7 @@ trait DocComments { self: Global =>
               (typeRef(NoPrefix, alias, Nil), false)
           }
 
+      @tailrec
       def subst(sym: Symbol, from: List[Symbol], to: List[(Type, Boolean)]): (Type, Boolean) =
         if (from.isEmpty) (sym.tpe, false)
         else if (from.head == sym) to.head

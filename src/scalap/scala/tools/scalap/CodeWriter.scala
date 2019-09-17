@@ -1,10 +1,14 @@
-/*     ___ ____ ___   __   ___   ___
-**    / _// __// _ | / /  / _ | / _ \    Scala classfile decoder
-**  __\ \/ /__/ __ |/ /__/ __ |/ ___/    (c) 2003-2013, LAMP/EPFL
-** /____/\___/_/ |_/____/_/ |_/_/        http://scala-lang.org/
-**
-*/
-
+/*
+ * Scala classfile decoder (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
 
 package scala
 package tools.scalap
@@ -13,8 +17,8 @@ import java.io._
 
 
 class CodeWriter(writer: Writer) {
+  import java.lang.System.{lineSeparator => nl}
 
-  private val nl = scala.compat.Platform.EOL
   private var step = "  "
   private var level = 0
   private var align = false
@@ -56,11 +60,7 @@ class CodeWriter(writer: Writer) {
     if (step == null)
       newspace
     else if (!line) {
-      try {
-        writer.write(nl)
-      } catch {
-        case e: Exception => sys.error("IO error")
-      }
+      writer.write(nl)
       line = align
       align = true
       space = false
@@ -112,7 +112,7 @@ class CodeWriter(writer: Writer) {
 
   def print(value: Double): CodeWriter = print(String.valueOf(value))
 
-  def print(value: String): CodeWriter = try {
+  def print(value: String): CodeWriter = {
     if (align) {
       var i = 0
       while (i < level) {
@@ -127,8 +127,6 @@ class CodeWriter(writer: Writer) {
     space = false
     line = false
     this
-  } catch {
-    case e: Exception => sys.error("IO error")
   }
 
   override def toString(): String = writer.toString()

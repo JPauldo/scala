@@ -11,7 +11,7 @@ Expr         ::=  (Bindings | id | ‘_’) ‘=>’ Expr
                |  Expr1
 Expr1        ::=  ‘if’ ‘(’ Expr ‘)’ {nl} Expr [[semi] ‘else’ Expr]
                |  ‘while’ ‘(’ Expr ‘)’ {nl} Expr
-               |  ‘try’ (‘{’ Block ‘}’ | Expr) [‘catch’ ‘{’ CaseClauses ‘}’] [‘finally’ Expr]
+               |  ‘try’ Expr [‘catch’ Expr] [‘finally’ Expr]
                |  ‘do’ Expr [semi] ‘while’ ‘(’ Expr ‘)’
                |  ‘for’ (‘(’ Enumerators ‘)’ | ‘{’ Enumerators ‘}’) {nl} [‘yield’] Expr
                |  ‘throw’ Expr
@@ -32,7 +32,7 @@ SimpleExpr1  ::=  Literal
                |  Path
                |  ‘_’
                |  ‘(’ [Exprs] ‘)’
-               |  SimpleExpr ‘.’ id s
+               |  SimpleExpr ‘.’ id
                |  SimpleExpr TypeArgs
                |  SimpleExpr1 ArgumentExprs
                |  XmlExpr
@@ -76,8 +76,8 @@ $T$ forSome { type $t_1[\mathit{tps}\_1] >: L_1 <: U_1$; $\ldots$; type $t_n[\ma
 SimpleExpr    ::=  Literal
 ```
 
-Typing of literals is as described [here](01-lexical-syntax.html#literals); their
-evaluation is immediate.
+Typing of literals is described along with their [lexical syntax](01-lexical-syntax.html#literals);
+their evaluation is immediate.
 
 ## The _Null_ Value
 
@@ -222,12 +222,17 @@ the linearization of class `D` is `{D, B, A, Root}`.
 Then we have:
 
 ```scala
-(new A).superA == "Root",
-                          (new C).superB = "Root", (new C).superC = "B",
-(new D).superA == "Root", (new D).superB = "A",    (new D).superD = "B",
+(new A).superA == "Root"
+
+(new C).superB == "Root"
+(new C).superC == "B"
+
+(new D).superA == "Root"
+(new D).superB == "A"
+(new D).superD == "B"
 ```
 
-Note that the `superB` function returns different results
+Note that the `superB` method returns different results
 depending on whether `B` is mixed in with class `Root` or `A`.
 
 ## Function Applications
@@ -242,9 +247,9 @@ Exprs         ::=  Expr {‘,’ Expr}
 
 An application `$f(e_1 , \ldots , e_m)$` applies the function `$f$` to the argument expressions `$e_1, \ldots , e_m$`. For this expression to be well-typed, the function must be *applicable* to its arguments, which is defined next by case analysis on $f$'s type.
 
-If $f$ has a method type `($p_1$:$T_1 , \ldots , p_n$:$T_n$)$U$`, each argument expression $e_i$ is typed with the corresponding parameter type $T_i$ as expected type. Let $S_i$ be the type of argument $e_i$ $(i = 1 , \ldots , m)$. The function $f$ must be _applicable_ to its arguments $e_1, \ldots , e_n$ of types $S_1 , \ldots , S_n$. We say that an argument expression $e_i$ is a _named_ argument if it has the form `$x_i=e'_i$` and `$x_i$` is one of the parameter names `$p_1, \ldots, p_n$`.
+If $f$ has a method type `($p_1$:$T_1 , \ldots , p_n$:$T_n$)$U$`, each argument expression $e_i$ is typed with the corresponding parameter type $T_i$ as expected type. Let $S_i$ be the type of argument $e_i$ $(i = 1 , \ldots , m)$. The method $f$ must be _applicable_ to its arguments $e_1, \ldots , e_n$ of types $S_1 , \ldots , S_n$. We say that an argument expression $e_i$ is a _named_ argument if it has the form `$x_i=e'_i$` and `$x_i$` is one of the parameter names `$p_1, \ldots, p_n$`.
 
-Once the types $S_i$ have been determined, the function $f$ of the above method type is said to be applicable if all of the following conditions hold:
+Once the types $S_i$ have been determined, the method $f$ of the above method type is said to be applicable if all of the following conditions hold:
   - for every named argument $p_j=e_i'$ the type $S_i$ is [compatible](03-types.html#compatibility) with the parameter type $T_j$;
   - for every positional argument $e_i$ the type $S_i$ is [compatible](03-types.html#compatibility) with $T_i$;
   - if the expected type is defined, the result type $U$ is [compatible](03-types.html#compatibility) to it.
@@ -265,7 +270,7 @@ of evaluating the rewritten right-hand side is finally converted to
 the function's declared result type, if one is given.
 
 The case of a formal parameter with a parameterless
-method type `=>$T$` is treated specially. In this case, the
+method type `=> $T$` is treated specially. In this case, the
 corresponding actual argument expression $e$ is not evaluated before the
 application. Instead, every use of the formal parameter on the
 right-hand side of the rewrite rule entails a re-evaluation of $e$.
@@ -291,12 +296,12 @@ sequence $e$ with its elements. When the application uses named
 arguments, the vararg parameter has to be specified exactly once.
 
 A function application usually allocates a new frame on the program's
-run-time stack. However, if a local function or a final method calls
+run-time stack. However, if a local method or a final method calls
 itself as its last action, the call is executed using the stack-frame
 of the caller.
 
 ###### Example
-Assume the following function which computes the sum of a
+Assume the following method which computes the sum of a
 variable number of arguments:
 
 ```scala
@@ -320,23 +325,23 @@ would not typecheck.
 
 ### Named and Default Arguments
 
-If an application might uses named arguments $p = e$ or default
+If an application is to use named arguments $p = e$ or default
 arguments, the following conditions must hold.
 
 - For every named argument $p_i = e_i$ which appears left of a positional argument
   in the argument list $e_1 \ldots e_m$, the argument position $i$ coincides with
-  the position of parameter $p_i$ in the parameter list of the applied function.
+  the position of parameter $p_i$ in the parameter list of the applied method.
 - The names $x_i$ of all named arguments are pairwise distinct and no named
   argument defines a parameter which is already specified by a
   positional argument.
 - Every formal parameter $p_j:T_j$ which is not specified by either a positional
-  or a named argument has a default argument.
+  or named argument has a default argument.
 
 If the application uses named or default
 arguments the following transformation is applied to convert it into
 an application without named or default arguments.
 
-If the function $f$
+If the method $f$
 has the form `$p.m$[$\mathit{targs}$]` it is transformed into the
 block
 
@@ -346,7 +351,7 @@ block
 }
 ```
 
-If the function $f$ is itself an application expression the transformation
+If the method $f$ is itself an application expression the transformation
 is applied recursively on $f$. The result of transforming $f$ is a block of
 the form
 
@@ -393,7 +398,7 @@ The final result of the transformation is a block of the form
 ### Signature Polymorphic Methods
 
 For invocations of signature polymorphic methods of the target platform `$f$($e_1 , \ldots , e_m$)`,
-the invoked function has a different method type `($p_1$:$T_1 , \ldots , p_n$:$T_n$)$U$` at each call
+the invoked method has a different method type `($p_1$:$T_1 , \ldots , p_n$:$T_n$)$U$` at each call
 site. The parameter types `$T_ , \ldots , T_n$` are the types of the argument expressions
 `$e_1 , \ldots , e_m$` and `$U$` is the expected type at the call site. If the expected type is
 undefined then `$U$` is `scala.AnyRef`. The parameter names `$p_1 , \ldots , p_n$` are fresh.
@@ -412,22 +417,22 @@ SimpleExpr    ::=  SimpleExpr1 ‘_’
 The expression `$e$ _` is well-formed if $e$ is of method
 type or if $e$ is a call-by-name parameter.  If $e$ is a method with
 parameters, `$e$ _` represents $e$ converted to a function
-type by [eta expansion](#eta-expansion). If $e$ is a
+type by [eta expansion](#eta-expansion-section). If $e$ is a
 parameterless method or call-by-name parameter of type
-`=>$T$`, `$e$ _` represents the function of type
+`=> $T$`, `$e$ _` represents the function of type
 `() => $T$`, which evaluates $e$ when it is applied to the empty
-parameterlist `()`.
+parameter list `()`.
 
 ###### Example
-The method values in the left column are each equivalent to the [eta-expanded expressions](#eta-expansion) on the right.
+The method values in the left column are each equivalent to the [eta-expanded expressions](#eta-expansion-section) on the right.
 
 | placeholder syntax            | eta-expansion                                                               |
 |------------------------------ | ----------------------------------------------------------------------------|
 |`math.sin _`                   | `x => math.sin(x)`                                                          |
 |`math.pow _`                   | `(x1, x2) => math.pow(x1, x2)`                                              |
 |`val vs = 1 to 9; vs.fold _`   | `(z) => (op) => vs.fold(z)(op)`                                             |
-|`(1 to 9).fold(z)_`            | `{ val eta1 = z; val eta2 = 1 to 9; op => eta2.fold(eta1)(op) }`            |
-|`Some(1).fold(??? : Int)_`     | `{ val eta1 = () => ???; val eta2 = Some(1); op => eta2.fold(eta1())(op) }` |
+|`(1 to 9).fold(z)_`            | `{ val eta1 = 1 to 9; val eta2 = z; op => eta1.fold(eta2)(op) }`            |
+|`Some(1).fold(??? : Int)_`     | `{ val eta1 = Some(1); val eta2 = () => ???; op => eta1.fold(eta2())(op) }` |
 
 Note that a space is necessary between a method name and the trailing underscore
 because otherwise the underscore would be considered part of the name.
@@ -455,7 +460,7 @@ $e$.
 
 Type applications can be omitted if
 [local type inference](#local-type-inference) can infer best type parameters
-for a polymorphic functions from the types of the actual function arguments
+for a polymorphic method from the types of the actual method arguments
 and the expected result type.
 
 ## Tuples
@@ -620,10 +625,10 @@ equivalent to the postfix method application
 
 <!-- TODO: Generalize to arbitrary operators -->
 
-Prefix operators are different from normal function applications in
+Prefix operators are different from normal method applications in
 that their operand expression need not be atomic. For instance, the
 input sequence `-sin(x)` is read as `-(sin(x))`, whereas the
-function application `negate sin(x)` would be parsed as the
+method application `negate sin(x)` would be parsed as the
 application of the infix operator `sin` to the operands
 `negate` and `(x)`.
 
@@ -693,9 +698,9 @@ This expression is then interpreted as $e.\mathit{op}(e_1,\ldots,e_n)$.
 
 A left-associative binary
 operation $e_1;\mathit{op};e_2$ is interpreted as $e_1.\mathit{op}(e_2)$. If $\mathit{op}$ is
-right-associative, the same operation is interpreted as
-`{ val $x$=$e_1$; $e_2$.$\mathit{op}$($x\,$) }`, where $x$ is a fresh
-name.
+right-associative and its parameter is passed by name, the same operation is interpreted as
+$e_2.\mathit{op}(e_1)$. If $\mathit{op}$ is right-associative and its parameter is passed by value,
+it is interpreted as `{ val $x$=$e_1$; $e_2$.$\mathit{op}$($x\,$) }`, where $x$ is a fresh name.
 
 ### Assignment Operators
 
@@ -773,17 +778,17 @@ depends on the definition of $x$. If $x$ denotes a mutable
 variable, then the assignment changes the current value of $x$ to be
 the result of evaluating the expression $e$. The type of $e$ is
 expected to conform to the type of $x$. If $x$ is a parameterless
-function defined in some template, and the same template contains a
-setter function `$x$_=` as member, then the assignment
+method defined in some template, and the same template contains a
+setter method `$x$_=` as member, then the assignment
 `$x$ = $e$` is interpreted as the invocation
-`$x$_=($e\,$)` of that setter function.  Analogously, an
-assignment `$f.x$ = $e$` to a parameterless function $x$
+`$x$_=($e\,$)` of that setter method.  Analogously, an
+assignment `$f.x$ = $e$` to a parameterless method $x$
 is interpreted as the invocation `$f.x$_=($e\,$)`.
 
-An assignment `$f$($\mathit{args}\,$) = $e$` with a function application to the
+An assignment `$f$($\mathit{args}\,$) = $e$` with a method application to the
 left of the ‘`=`’ operator is interpreted as
 `$f.$update($\mathit{args}$, $e\,$)`, i.e.
-the invocation of an `update` function defined by $f$.
+the invocation of an `update` method defined by $f$.
 
 ###### Example
 Here are some assignment expressions and their equivalent expansions.
@@ -880,7 +885,7 @@ Expr1          ::=  ‘while’ ‘(’ Expr ‘)’ {nl} Expr
 
 The _while loop expression_ `while ($e_1$) $e_2$` is typed and
 evaluated as if it was an application of `whileLoop ($e_1$) ($e_2$)` where
-the hypothetical function `whileLoop` is defined as follows.
+the hypothetical method `whileLoop` is defined as follows.
 
 ```scala
 def whileLoop(cond: => Boolean)(body: => Unit): Unit  =
@@ -926,7 +931,8 @@ be implemented in different ways for different carrier types.
 
 The translation scheme is as follows.  In a first step, every
 generator `$p$ <- $e$`, where $p$ is not [irrefutable](08-pattern-matching.html#patterns)
-for the type of $e$ is replaced by
+for the type of $e$, and $p$ is some pattern other than a simple name
+or a name followed by a colon and a type, is replaced by
 
 ```scala
 $p$ <- $e$.withFilter { case $p$ => true; case _ => false }
@@ -1008,7 +1014,7 @@ The for comprehension is translated to:
 ###### Example
 For comprehensions can be used to express vector
 and matrix algorithms concisely.
-For instance, here is a function to compute the transpose of a given matrix:
+For instance, here is a method to compute the transpose of a given matrix:
 
 <!-- see test/files/run/t0421.scala -->
 
@@ -1019,7 +1025,7 @@ def transpose[A](xss: Array[Array[A]]) = {
 }
 ```
 
-Here is a function to compute the scalar product of two vectors:
+Here is a method to compute the scalar product of two vectors:
 
 ```scala
 def scalprod(xs: Array[Double], ys: Array[Double]) = {
@@ -1029,7 +1035,7 @@ def scalprod(xs: Array[Double], ys: Array[Double]) = {
 }
 ```
 
-Finally, here is a function to compute the product of two matrices.
+Finally, here is a method to compute the product of two matrices.
 Compare with the [imperative version](#example-imperative-matrix-multiplication).
 
 ```scala
@@ -1052,35 +1058,31 @@ Expr1      ::=  ‘return’ [Expr]
 ```
 
 A _return expression_ `return $e$` must occur inside the body of some
-enclosing named method or function. The innermost enclosing named
-method or function in a source program, $f$, must have an explicitly declared result type,
-and the type of $e$ must conform to it.
-The return expression
-evaluates the expression $e$ and returns its value as the result of
-$f$. The evaluation of any statements or
+enclosing user defined method. The innermost enclosing method in a
+source program, $m$, must have an explicitly declared result type, and
+the type of $e$ must conform to it.
+
+The return expression evaluates the expression $e$ and returns its
+value as the result of $m$. The evaluation of any statements or
 expressions following the return expression is omitted. The type of
 a return expression is `scala.Nothing`.
 
-The expression $e$ may be omitted.  The return expression
-`return` is type-checked and evaluated as if it was `return ()`.
+The expression $e$ may be omitted. The return expression
+`return` is type-checked and evaluated as if it were `return ()`.
 
-An `apply` method which is generated by the compiler as an
-expansion of an anonymous function does not count as a named function
-in the source program, and therefore is never the target of a return
-expression.
-
-Returning from a nested anonymous function is implemented by throwing
-and catching a `scala.runtime.NonLocalReturnException`.  Any
-exception catches between the point of return and the enclosing
-methods might see the exception.  A key comparison makes sure that
-these exceptions are only caught by the method instance which is
-terminated by the return.
+Returning from the method from within a nested function may be
+implemented by throwing and catching a
+`scala.runtime.NonLocalReturnException`. Any exception catches
+between the point of return and the enclosing methods might see
+and catch that exception. A key comparison makes sure that this
+exception is only caught by the method instance which is terminated
+by the return.
 
 If the return expression is itself part of an anonymous function, it
-is possible that the enclosing instance of $f$ has already returned
+is possible that the enclosing method $m$ has already returned
 before the return expression is executed. In that case, the thrown
-`scala.runtime.NonLocalReturnException` will not be caught,
-and will propagate up the call stack.
+`scala.runtime.NonLocalReturnException` will not be caught, and will
+propagate up the call stack.
 
 ## Throw Expressions
 
@@ -1102,8 +1104,7 @@ is `scala.Nothing`.
 ## Try Expressions
 
 ```ebnf
-Expr1 ::=  ‘try’ (‘{’ Block ‘}’ | Expr) [‘catch’ ‘{’ CaseClauses ‘}’]
-           [‘finally’ Expr]
+Expr1 ::=  ‘try’ Expr [‘catch’ Expr] [‘finally’ Expr]
 ```
 
 A _try expression_ is of the form `try { $b$ } catch $h$`
@@ -1176,7 +1177,7 @@ If there is no expected type for the function literal, all formal parameter type
 The eventual run-time value of an anonymous function is determined by the expected type:
   - a subclass of one of the builtin function types, `scala.Function$n$[$S_1 , \ldots , S_n$, $R\,$]` (with $S_i$ and $R$ fully defined),
   - a [single-abstract-method (SAM) type](#sam-conversion);
-  - `PartialFunction[$T$, $U$]`, if the function literal is of the shape `x => x match { $\ldots$ }`
+  - `PartialFunction[$T$, $U$]`
   - some other type.
 
 The standard anonymous function evaluates in the same way as the following instance creation expression:
@@ -1191,7 +1192,15 @@ The same evaluation holds for a SAM type, except that the instantiated type is g
 
 The underlying platform may provide more efficient ways of constructing these instances, such as Java 8's `invokedynamic` bytecode and `LambdaMetaFactory` class.
 
-A `PartialFunction`'s value receives an additional `isDefinedAt` member, which is derived from the pattern match in the function literal, with each case's body being replaced by `true`, and an added default (if none was given) that evaluates to `false`.
+When a `PartialFunction` is required, an additional member `isDefinedAt`
+is synthesized, which simply returns `true`.
+However, if the function literal has the shape `x => x match { $\ldots$ }`,
+then `isDefinedAt` is derived from the pattern match in the following way:
+each case from the match expression evaluates to `true`,
+and if there is no default case,
+a default case is added that evalutes to `false`.
+For more details on how that is implemented see
+["Pattern Matching Anonymous Functions"](08-pattern-matching.html#pattern-matching-anonymous-functions).
 
 ###### Example
 Examples of anonymous functions:
@@ -1269,7 +1278,7 @@ include at least the expressions of the following forms:
 
 ```ebnf
 BlockStat    ::=  Import
-               |  {Annotation} [‘implicit’ | ‘lazy’] Def
+               |  {Annotation} [‘implicit’] [‘lazy’] Def
                |  {Annotation} {LocalModifier} TmplDef
                |  Expr1
                |
@@ -1366,7 +1375,7 @@ It follows that:
   - it must be possible to derive a fully-defined type `U` from `S` by inferring any unknown type parameters of `C`.
 
 Finally, we impose some implementation restrictions (these may be lifted in future releases):
-  - `C` must not be nested or local (it must not capture its environment, as that results in a zero-argument constructor)
+  - `C` must not be nested or local (it must not capture its environment, as that results in a nonzero-argument constructor)
   - `C`'s constructor must not have an implicit argument list (this simplifies type inference);
   - `C` must not declare a self type (this simplifies type inference);
   - `C` must not be `@specialized`.
@@ -1397,9 +1406,12 @@ arguments are passed following the rules [here](07-implicits.html#implicit-param
 
 ###### Eta Expansion
 Otherwise, if the method is not a constructor,
-and the expected type $\mathit{pt}$ is a function type
-$(\mathit{Ts}') \Rightarrow T'$, [eta-expansion](#eta-expansion)
+and the expected type $\mathit{pt}$ is a function type, or,
+for methods of non-zero arity, a type [sam-convertible](#sam-conversion) to a function type,
+$(\mathit{Ts}') \Rightarrow T'$, [eta-expansion](#eta-expansion-section)
 is performed on the expression $e$.
+
+(The exception for zero-arity methods is to avoid surprises due to unexpected sam conversion.)
 
 ###### Empty Application
 Otherwise, if $e$ has method type $()T$, it is implicitly applied to the empty
@@ -1422,6 +1434,7 @@ The *shape* of an argument expression $e$, written  $\mathit{shape}(e)$, is
 a type that is defined as follows:
   - For a function expression `($p_1$: $T_1 , \ldots , p_n$: $T_n$) => $b$: (Any $, \ldots ,$ Any) => $\mathit{shape}(b)$`,
     where `Any` occurs $n$ times in the argument type.
+  - For a pattern-matching anonymous function definition `{ case ... }`: `PartialFunction[Any, Nothing]`.
   - For a named argument `$n$ = $e$`: $\mathit{shape}(e)$.
   - For all other expressions: `Nothing`.
 
@@ -1430,11 +1443,31 @@ to expressions $(e_1 , \ldots , e_n)$ of types $(\mathit{shape}(e_1) , \ldots , 
 If there is precisely one alternative in $\mathscr{B}$, that alternative is chosen.
 
 Otherwise, let $S_1 , \ldots , S_m$ be the list of types obtained by typing each argument as follows.
-An argument `$e_i$` of the shape `($p_1$: $T_1 , \ldots , p_n$: $T_n$) => $b$` where one of the `$T_i$` is missing,
-i.e., a function literal with a missing parameter type, is typed with an expected function type that
-propagates the least upper bound of the fully defined types of the corresponding parameters of
-the ([SAM-converted](#sam-conversion)) function types specified by the `$i$`th argument type found in each alternative.
-All other arguments are typed with an undefined expected type.
+
+Normally, an argument is typed without an expected type, except when
+all alternatives explicitly specify the same parameter type for this argument (a missing parameter type,
+due to e.g. arity differences, is taken as `NoType`, thus resorting to no expected type),
+or when trying to propagate more type information to aid inference of higher-order function parameter types, as explained next.
+
+The intuition for higher-order function parameter type inference is that all arguments must be of a function-like type
+(`PartialFunction`, `FunctionN` or some equivalent [SAM type](#sam-conversion)),
+which in turn must define the same set of higher-order argument types, so that they can safely be used as
+the expected type of a given argument of the overloaded method, without unduly ruling out any alternatives.
+The intent is not to steer overloading resolution, but to preserve enough type information to steer type
+inference of the arguments (a function literal or eta-expanded method) to this overloaded method.
+
+Note that the expected type drives eta-expansion (not performed unless a function-like type is expected),
+as well as inference of omitted parameter types of function literals.
+
+More precisely, an argument `$e_i$` is typed with an expected type that is derived from the `$i$`th argument
+type found in each alternative (call these `$T_{ij}$` for alternative `$j$` and argument position `$i$`) when
+all `$T_{ij}$` are function types `$(A_{1j},..., A_{nj}) => ?$` (or the equivalent `PartialFunction`, or SAM)
+of some arity `$n$`, and their argument types `$A_{kj}$` are identical across all overloads `$j$` for a
+given `$k$`. Then, the expected type for `$e_i$` is derived as follows:
+   - we use `$PartialFunction[A_{1j},..., A_{nj}, ?]$` if for some overload `$j$`, `$T_{ij}$`'s type symbol is `PartialFunction`;
+   - else, if for some `$j$`, `$T_{ij}$` is `FunctionN`, the expected type is `$FunctionN[A_{1j},..., A_{nj}, ?]$`;
+   - else, if for all `$j$`, `$T_{ij}$` is a SAM type of the same class, defining argument types `$A_{1j},..., A_{nj}$`
+     (and a potentially varying result type), the expected type encodes these argument types and the SAM class.
 
 For every member $m$ in $\mathscr{B}$ one determines whether it is applicable
 to expressions ($e_1 , \ldots , e_m$) of types $S_1, \ldots , S_m$.
@@ -1462,7 +1495,9 @@ question: given
 
 - A parameterized method $m$ of type `($p_1:T_1, \ldots , p_n:T_n$)$U$` is
   _as specific as_ some other member $m'$ of type $S$ if $m'$ is [applicable](#function-applications)
-  to arguments `($p_1 , \ldots , p_n$)` of types $T_1 , \ldots , T_n$.
+  to arguments `($p_1 , \ldots , p_n$)` of types $T_1 , \ldots , Tlast$;
+  if $T_n$ denotes a repeated parameter (it has shape $T*$), and so does $m'$'s last parameter,
+  $Tlast$ is taken as $T$, otherwise is $T_n$ used directly.
 - A polymorphic method of type `[$a_1$ >: $L_1$ <: $U_1 , \ldots , a_n$ >: $L_n$ <: $U_n$]$T$` is
   as specific as some other member of type $S$ if $T$ is as specific as $S$
   under the assumption that for $i = 1 , \ldots , n$ each $a_i$ is an abstract type name
@@ -1559,11 +1594,13 @@ value arguments, the type arguments are inferred by solving a
 constraint system which relates the expression's type $T$ with the
 expected type $\mathit{pt}$. Without loss of generality we can assume that
 $T$ is a value type; if it is a method type we apply
-[eta-expansion](#eta-expansion) to convert it to a function type. Solving
+[eta-expansion](#eta-expansion-section) to convert it to a function type. Solving
 means finding a substitution $\sigma$ of types $T_i$ for the type
 parameters $a_i$ such that
 
 - None of the inferred types $T_i$ is a [singleton type](03-types.html#singleton-types)
+  unless it is a singleton type corresponding to an object or a constant value
+  definition or the corresponding bound $U_i$ is a subtype of `scala.Singleton`.
 - All type parameter bounds are respected, i.e.
   $\sigma L_i <: \sigma a_i$ and $\sigma a_i <: \sigma U_i$ for $i = 1 , \ldots , n$.
 - The expression's type conforms to the expected type, i.e.
@@ -1584,7 +1621,7 @@ The last case applies if the expression
 $e$ appears in an application $e(d_1 , \ldots , d_m)$. In that case
 $T$ is a method type $(p_1:R_1 , \ldots , p_m:R_m)T'$. Without loss of
 generality we can assume that the result type $T'$ is a value type; if
-it is a method type we apply [eta-expansion](#eta-expansion) to
+it is a method type we apply [eta-expansion](#eta-expansion-section) to
 convert it to a function type.  One computes first the types $S_j$ of
 the argument expressions $d_j$, using two alternative schemes.  Each
 argument expression $d_j$ is typed first with the expected type $R_j$,
@@ -1601,6 +1638,8 @@ finding a substitution $\sigma$ of types $T_i$ for the type parameters
 $a_i$ such that
 
 - None of the inferred types $T_i$ is a [singleton type](03-types.html#singleton-types)
+  unless it is a singleton type corresponding to an object or a constant value
+  definition or the corresponding bound $U_i$ is a subtype of `scala.Singleton`.
 - All type parameter bounds are respected, i.e. $\sigma L_i <: \sigma a_i$ and
   $\sigma a_i <: \sigma U_i$ for $i = 1 , \ldots , n$.
 - The method's result type $T'$ conforms to the expected type, i.e. $\sigma T' <: \sigma \mathit{pt}$.
@@ -1714,7 +1753,7 @@ a = scala.Any
 
 so `scala.Any` is the type inferred for `a`.
 
-### Eta Expansion
+### <a name="eta-expansion-section">Eta Expansion</a>
 
 _Eta-expansion_ converts an expression of method type to an
 equivalent expression of function type. It proceeds in two steps.
@@ -1741,27 +1780,20 @@ a sub-expression of parameterless method type, is not evaluated in the expanded 
 
 ### Dynamic Member Selection
 
-The standard Scala library defines a trait `scala.Dynamic` which defines a member
-`applyDynamic` as follows:
+The standard Scala library defines a marker trait `scala.Dynamic`. Subclasses of this trait are able to intercept selections and applications on their instances by defining methods of the names `applyDynamic`, `applyDynamicNamed`, `selectDynamic`, and `updateDynamic`.
 
-```scala
-package scala
-trait Dynamic {
-  def applyDynamic (name: String, args: Any*): Any
-  ...
-}
-```
+The following rewrites are performed, assuming $e$'s type conforms to `scala.Dynamic`, and the original expression does not type check under the normal rules, as specified fully in the relevant subsection of [implicit conversion](#dynamic-member-selection):
 
-Assume a selection of the form $e.x$ where the type of $e$ conforms to `scala.Dynamic`.
-Further assuming the selection is not followed by any function arguments, such an expression can be rewritten under the conditions given [here](#implicit-conversions) to:
+ *  `e.m[Ti](xi)` becomes `e.applyDynamic[Ti]("m")(xi)`
+ *  `e.m[Ti]`     becomes `e.selectDynamic[Ti]("m")`
+ *  `e.m = x`     becomes `e.updateDynamic("m")(x)`
 
-```scala
-$e$.applyDynamic("$x$")
-```
+If any arguments are named in the application (one of the `xi` is of the shape `arg = x`), their name is preserved as the first component of the pair passed to `applyDynamicNamed` (for missing names, `""` is used):
 
-If the selection is followed by some arguments, e.g. $e.x(\mathit{args})$, then that expression
-is rewritten to
+ *  `e.m[Ti](argi = xi)` becomes `e.applyDynamicNamed[Ti]("m")(("argi", xi))`
 
-```scala
-$e$.applyDynamic("$x$", $\mathit{args}$)
-```
+Finally:
+
+ *  `e.m(x) = y` becomes `e.selectDynamic("m").update(x, y)`
+
+None of these methods are actually defined in the `scala.Dynamic`, so that users are free to define them with or without type parameters, or implicit arguments.

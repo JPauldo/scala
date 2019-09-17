@@ -10,18 +10,24 @@ import scala.collection.JavaConverters._
 import scala.tools.asm.Opcodes._
 import scala.tools.asm.tree._
 import scala.tools.nsc.backend.jvm.AsmUtils._
-import scala.tools.testing.BytecodeTesting
+import scala.tools.testkit.BytecodeTesting
 
 @RunWith(classOf[JUnit4])
 class InlinerIllegalAccessTest extends BytecodeTesting {
   override def compilerArgs = "-opt:l:none"
 
   import compiler._
+  import global.genBCode.postProcessor.{bTypesFromClassfile, byteCodeRepository, inliner}
+  import bTypesFromClassfile._
   import global.genBCode.bTypes._
 
   def addToRepo(cls: List[ClassNode]): Unit = for (c <- cls) byteCodeRepository.add(c, None)
   def assertEmpty(ins: List[AbstractInsnNode]) = for (i <- ins)
     throw new AssertionError(textify(i))
+
+  def clearClassBTypeCaches(): Unit = {
+    classBTypeCache.clear()
+  }
 
   @Test
   def typeAccessible(): Unit = {
@@ -56,7 +62,7 @@ class InlinerIllegalAccessTest extends BytecodeTesting {
     check(eClass, assertEmpty) // C is public, so accessible in E
 
     byteCodeRepository.parsedClasses.clear()
-    classBTypeFromInternalName.clear()
+    clearClassBTypeCaches()
 
     cClass.access &= ~ACC_PUBLIC // ftw
     addToRepo(allClasses)
@@ -72,6 +78,11 @@ class InlinerIllegalAccessTest extends BytecodeTesting {
         }
       // MatchError otherwise
     })
+
+    // ensure the caches are empty at the end for the next test to run (`check` caches types by
+    // calling `classBTypeFromParsedClassfile`). note that per-run caches are cleared at the end
+    // of a compilation, not the beginning.
+    clearClassBTypeCaches()
   }
 
   @Test
@@ -190,5 +201,10 @@ class InlinerIllegalAccessTest extends BytecodeTesting {
     // privated method accesses can only be inlined in the same class
     for (m <- Set(rdC, rhC)) check(m, cCl, cCl, assertEmpty)
     for (m <- Set(rdC, rhC); c <- allClasses.tail) check(m, cCl, c, cOrDOwner)
+
+    // ensure the caches are empty at the end for the next test to run (`check` caches types by
+    // calling `classBTypeFromParsedClassfile`). note that per-run caches are cleared at the end
+    // of a compilation, not the beginning.
+    clearClassBTypeCaches()
   }
 }

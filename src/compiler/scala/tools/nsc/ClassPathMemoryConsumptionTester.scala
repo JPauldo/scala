@@ -1,6 +1,15 @@
 /*
- * Copyright (c) 2014 Contributor. All rights reserved.
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
+
 package scala.tools.nsc
 
 import scala.io.StdIn.readLine
@@ -19,7 +28,7 @@ object ClassPathMemoryConsumptionTester {
 
   private class MainRetainsGlobal extends scala.tools.nsc.MainClass {
     var retainedGlobal: Global = _
-    override def doCompile(compiler: Global) {
+    override def doCompile(compiler: Global): Unit = {
       retainedGlobal = compiler
       super.doCompile(compiler)
     }
@@ -65,7 +74,7 @@ object ClassPathMemoryConsumptionTester {
     val settings = new TestSettings()
     settings.processArguments(args, processAll = true)
     if (settings.classpath.isDefault)
-      settings.classpath.value = sys.props("java.class.path")
+      settings.classpath.value = System.getProperty("java.class.path", ".")
     settings
   }
 

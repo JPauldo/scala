@@ -18,13 +18,13 @@ object Test extends BytecodeTest {
       .map(_.trim)
   }
 
-  def show {
+  def show: Unit = {
     // It seems like @java.lang.Deprecated shows up in both the
     // Deprecated attribute and RuntimeVisibleAnnotation attribute,
     // while @scala.deprecated only shows up in the Deprecated attribute.
     // The check file just documents status quo, not sure if Scala
     // should brought in line with Java or not...
-    // See the commit message and SI-8883 for more info.
+    // See the commit message and scala/bug#8883 for more info.
     println(annotationsForClass("DJava"))
     println(annotationsForClass("DScala"))
 

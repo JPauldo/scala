@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala
@@ -8,12 +15,8 @@ package reflect
 package internal
 
 import Flags._
+import scala.annotation.tailrec
 
-/** This class ...
- *
- *  @author Martin Odersky
- *  @version 1.0
- */
 abstract class TreeInfo {
   val global: SymbolTable
 
@@ -114,19 +117,21 @@ abstract class TreeInfo {
   private def symOk(sym: Symbol) = sym != null && !sym.isError && sym != NoSymbol
   private def typeOk(tp: Type)   =  tp != null && ! tp.isError
 
+  private def isUncheckedStable(sym: Symbol) = sym.isTerm && sym.hasAnnotation(uncheckedStableClass)
+
   /** Assuming `sym` is a member of `tree`, is it a "stable member"?
    *
    * Stable members are packages or members introduced
    * by object definitions or by value definitions of non-volatile types (§3.6).
    */
   def isStableMemberOf(sym: Symbol, tree: Tree, allowVolatile: Boolean): Boolean = (
-    symOk(sym)       && (!sym.isTerm   || (sym.isStable && (allowVolatile || !sym.hasVolatileType))) &&
+    symOk(sym)       && (!sym.isTerm   || ((sym.isStable || isUncheckedStable(sym)) && (allowVolatile || !sym.hasVolatileType))) &&
     typeOk(tree.tpe) && (allowVolatile || !hasVolatileType(tree)) && !definitions.isByNameParamType(tree.tpe)
   )
 
   private def isStableIdent(tree: Ident, allowVolatile: Boolean): Boolean = (
        symOk(tree.symbol)
-    && tree.symbol.isStable
+    && (tree.symbol.isStable || isUncheckedStable(tree.symbol))
     && !definitions.isByNameParamType(tree.tpe)
     && !definitions.isByName(tree.symbol)
     && (allowVolatile || !tree.symbol.hasVolatileType) // TODO SPEC: not required by spec
@@ -135,7 +140,7 @@ abstract class TreeInfo {
   /** Is `tree`'s type volatile? (Ignored if its symbol has the @uncheckedStable annotation.)
    */
   def hasVolatileType(tree: Tree): Boolean =
-    symOk(tree.symbol) && tree.tpe.isVolatile && !tree.symbol.hasAnnotation(uncheckedStableClass)
+    symOk(tree.symbol) && tree.tpe.isVolatile && !isUncheckedStable(tree.symbol)
 
   /** Is `tree` either a non-volatile type,
    *  or a path that does not include any of:
@@ -149,11 +154,11 @@ abstract class TreeInfo {
 
   /** Is `tree` admissible as a stable identifier pattern (8.1.5 Stable Identifier Patterns)?
    *
-   * We disregard volatility, as it's irrelevant in patterns (SI-6815)
+   * We disregard volatility, as it's irrelevant in patterns (scala/bug#6815)
    */
   def isStableIdentifierPattern(tree: Tree): Boolean = isStableIdentifier(tree, allowVolatile = true)
 
-  // TODO SI-5304 tighten this up so we don't elide side effect in module loads
+  // TODO scala/bug#5304 tighten this up so we don't elide side effect in module loads
   def isQualifierSafeToElide(tree: Tree): Boolean = isExprSafeToInline(tree)
 
   /** Is tree an expression which can be inlined without affecting program semantics?
@@ -164,7 +169,8 @@ abstract class TreeInfo {
    *  takes a different code path than all to follow; but they are safe to inline
    *  because the expression result from evaluating them is always the same.
    */
-  def isExprSafeToInline(tree: Tree): Boolean = tree match {
+  @tailrec
+  final def isExprSafeToInline(tree: Tree): Boolean = tree match {
     case EmptyTree
        | This(_)
        | Super(_, _)
@@ -189,7 +195,7 @@ abstract class TreeInfo {
       // However, before typing, applications of nullary functional values are also
       // Apply(function, Nil) trees. To prevent them from being treated as pure,
       // we check that the callee is a method.
-      // The callee might also be a Block, which has a null symbol, so we guard against that (SI-7185)
+      // The callee might also be a Block, which has a null symbol, so we guard against that (scala/bug#7185)
       fn.symbol != null && fn.symbol.isMethod && !fn.symbol.isLazy && isExprSafeToInline(fn)
     case Typed(expr, _) =>
       isExprSafeToInline(expr)
@@ -205,8 +211,10 @@ abstract class TreeInfo {
    *  don't reuse it for important matters like inlining
    *  decisions.
    */
-  def isPureExprForWarningPurposes(tree: Tree): Boolean = tree match {
+  @tailrec
+  final def isPureExprForWarningPurposes(tree: Tree): Boolean = tree match {
     case Typed(expr, _)                    => isPureExprForWarningPurposes(expr)
+    case Function(_, _)                    => true
     case EmptyTree | Literal(Constant(())) => false
     case _                                 =>
       def isWarnableRefTree = tree match {
@@ -268,12 +276,18 @@ abstract class TreeInfo {
     case _ => false
   }
 
+  def isPartialFunctionMissingParamType(tree: Tree): Boolean = tree match {
+    case Match(EmptyTree, _) => true
+    case _ => false
+  }
+
 
   /** Is symbol potentially a getter of a variable?
    */
   def mayBeVarGetter(sym: Symbol): Boolean = sym.info match {
     case NullaryMethodType(_)              => sym.owner.isClass && !sym.isStable
     case PolyType(_, NullaryMethodType(_)) => sym.owner.isClass && !sym.isStable
+    case PolyType(_, mt @ MethodType(_, _))=> mt.isImplicit && sym.owner.isClass && !sym.isStable
     case mt @ MethodType(_, _)             => mt.isImplicit && sym.owner.isClass && !sym.isStable
     case _                                 => false
   }
@@ -283,11 +297,10 @@ abstract class TreeInfo {
   def isVariableOrGetter(tree: Tree) = {
     def sym       = tree.symbol
     def isVar     = sym.isVariable
-    def isGetter  = mayBeVarGetter(sym) && sym.owner.info.member(sym.setterName) != NoSymbol
 
     tree match {
       case Ident(_)                               => isVar
-      case Select(_, _)                           => isVar || isGetter
+      case Select(qual, _)                        => isVar || mayBeVarGetter(sym) && qual.tpe.member(sym.setterName) != NoSymbol
       case Applied(Select(qual, nme.apply), _, _) => qual.tpe.member(nme.update) != NoSymbol
       case _                                      => false
     }
@@ -337,9 +350,9 @@ abstract class TreeInfo {
    * Named arguments can transform a constructor call into a block, e.g.
    *   <init>(b = foo, a = bar)
    * is transformed to
-   *   { val x$1 = foo
-   *     val x$2 = bar
-   *     <init>(x$2, x$1)
+   *   { val x\$1 = foo
+   *     val x\$2 = bar
+   *     <init>(x\$2, x\$1)
    *   }
    */
   def stripNamedApplyBlock(tree: Tree) = tree match {
@@ -349,8 +362,9 @@ abstract class TreeInfo {
       tree
   }
 
-  /** Strips layers of `.asInstanceOf[T]` / `_.$asInstanceOf[T]()` from an expression */
-  def stripCast(tree: Tree): Tree = tree match {
+  /** Strips layers of `.asInstanceOf[T]` / `_.\$asInstanceOf[T]()` from an expression */
+  @tailrec
+  final def stripCast(tree: Tree): Tree = tree match {
     case TypeApply(sel @ Select(inner, _), _) if isCastSymbol(sel.symbol) =>
       stripCast(inner)
     case Apply(TypeApply(sel @ Select(inner, _), _), Nil) if isCastSymbol(sel.symbol) =>
@@ -365,7 +379,7 @@ abstract class TreeInfo {
 
   /** Is tree a self or super constructor call? */
   def isSelfOrSuperConstrCall(tree: Tree) = {
-    // stripNamedApply for SI-3584: adaptToImplicitMethod in Typers creates a special context
+    // stripNamedApply for scala/bug#3584: adaptToImplicitMethod in Typers creates a special context
     // for implicit search in constructor calls, adaptToImplicitMethod(isSelfOrConstrCall)
     val tree1 = stripNamedApplyBlock(tree)
     isSelfConstrCall(tree1) || isSuperConstrCall(tree1)
@@ -377,7 +391,7 @@ abstract class TreeInfo {
    * on information at the `parser` phase? To qualify, there
    * may be no subtree that will be interpreted as a
    * Stable Identifier Pattern, nor any type tests, even
-   * on TupleN. See SI-6968.
+   * on TupleN. See scala/bug#6968.
    *
    * For instance:
    *
@@ -418,6 +432,7 @@ abstract class TreeInfo {
    *
    */
   def isVarPatternDeep(tree: Tree): Boolean = {
+    @tailrec
     def isVarPatternDeep0(tree: Tree): Boolean = {
       tree match {
         case Bind(name, pat)  => isVarPatternDeep0(pat)
@@ -435,6 +450,11 @@ abstract class TreeInfo {
   def isVarPattern(pat: Tree): Boolean = pat match {
     case x: Ident           => !x.isBackquoted && nme.isVariableName(x.name)
     case _                  => false
+  }
+
+  def isLiteralString(t: Tree): Boolean = t match {
+    case Literal(Constant(_: String)) => true
+    case _ => false
   }
 
   /** Does the tree have a structure similar to typechecked trees? */
@@ -544,22 +564,19 @@ abstract class TreeInfo {
     case _                                                          => false
   }
 
-  /** Translates an Assign(_, _) node to AssignOrNamedArg(_, _) if
+  /** Translates an Assign(_, _) node to NamedArg(_, _) if
    *  the lhs is a simple ident. Otherwise returns unchanged.
    */
   def assignmentToMaybeNamedArg(tree: Tree) = tree match {
-    case t @ Assign(id: Ident, rhs) => atPos(t.pos)(AssignOrNamedArg(id, rhs))
+    case t @ Assign(id: Ident, rhs) => atPos(t.pos)(NamedArg(id, rhs))
     case t                          => t
   }
-
-  /** Is name a left-associative operator? */
-  def isLeftAssoc(operator: Name) = operator.nonEmpty && (operator.endChar != ':')
 
   /** a Match(Typed(_, tpt), _) must be translated into a switch if isSwitchAnnotation(tpt.tpe) */
   def isSwitchAnnotation(tpe: Type) = tpe hasAnnotation definitions.SwitchClass
 
   /** can this type be a type pattern */
-  def mayBeTypePat(tree: Tree): Boolean = tree match {
+  final def mayBeTypePat(tree: Tree): Boolean = tree match {
     case CompoundTypeTree(Template(tps, _, Nil)) => tps exists mayBeTypePat
     case Annotated(_, tp)                        => mayBeTypePat(tp)
     case AppliedTypeTree(constr, args)           => mayBeTypePat(constr) || args.exists(_.isInstanceOf[Bind])
@@ -680,7 +697,8 @@ abstract class TreeInfo {
   }
 
   /** The underlying pattern ignoring any bindings */
-  def unbind(x: Tree): Tree = x match {
+  @tailrec
+  final def unbind(x: Tree): Tree = x match {
     case Bind(_, y) => unbind(y)
     case y          => y
   }
@@ -766,6 +784,7 @@ abstract class TreeInfo {
      *  The original tree if it's not an application.
      */
     def callee: Tree = {
+      @tailrec
       def loop(tree: Tree): Tree = tree match {
         case Apply(fn, _) => loop(fn)
         case tree         => tree
@@ -827,9 +846,10 @@ abstract class TreeInfo {
   }
 
   /** Does list of trees start with a definition of
-   *  a class of module with given name (ignoring imports)
+   *  a class or module with given name (ignoring imports)
    */
-  def firstDefinesClassOrObject(trees: List[Tree], name: Name): Boolean = trees match {
+  @tailrec
+  final def firstDefinesClassOrObject(trees: List[Tree], name: Name): Boolean = trees match {
     case Import(_, _) :: xs             => firstDefinesClassOrObject(xs, name)
     case Annotated(_, tree1) :: _       => firstDefinesClassOrObject(List(tree1), name)
     case ModuleDef(_, `name`, _) :: _   => true
@@ -842,32 +862,14 @@ abstract class TreeInfo {
    */
   object Unapplied {
     // Duplicated with `spliceApply`
+    @tailrec
     def unapply(tree: Tree): Option[Tree] = tree match {
-      // SI-7868 Admit Select() to account for numeric widening, e.g. <unapplySelector>.toInt
+      // scala/bug#7868 Admit Select() to account for numeric widening, e.g. <unapplySelector>.toInt
       case Apply(fun, (Ident(nme.SELECTOR_DUMMY)| Select(Ident(nme.SELECTOR_DUMMY), _)) :: Nil)
                          => Some(fun)
       case Apply(fun, _) => unapply(fun)
       case _             => None
     }
-  }
-
-  /** Is this file the body of a compilation unit which should not
-   *  have Predef imported?
-   */
-  def noPredefImportForUnit(body: Tree) = {
-    // Top-level definition whose leading imports include Predef.
-    def isLeadingPredefImport(defn: Tree): Boolean = defn match {
-      case PackageDef(_, defs1) => defs1 exists isLeadingPredefImport
-      case Import(expr, _)      => isReferenceToPredef(expr)
-      case _                    => false
-    }
-    // Compilation unit is class or object 'name' in package 'scala'
-    def isUnitInScala(tree: Tree, name: Name) = tree match {
-      case PackageDef(Ident(nme.scala_), defs) => firstDefinesClassOrObject(defs, name)
-      case _                                   => false
-    }
-
-    isUnitInScala(body, nme.Predef) || isLeadingPredefImport(body)
   }
 
   def isAbsTypeDef(tree: Tree) = tree match {
@@ -907,12 +909,19 @@ abstract class TreeInfo {
 
   def isApplyDynamicName(name: Name) = (name == nme.updateDynamic) || (name == nme.selectDynamic) || (name == nme.applyDynamic) || (name == nme.applyDynamicNamed)
 
+  private object LiteralNameOrAdapted {
+    def unapply(tree: Tree) = tree match {
+      case Literal(Constant(name))                 => Some(name)
+      case Apply(_, List(Literal(Constant(name)))) => Some(name)
+      case _                                       => None
+    }
+  }
   class DynamicApplicationExtractor(nameTest: Name => Boolean) {
     def unapply(tree: Tree) = tree match {
-      case Apply(TypeApply(Select(qual, oper), _), List(Literal(Constant(name)))) if nameTest(oper) => Some((qual, name))
-      case Apply(Select(qual, oper), List(Literal(Constant(name)))) if nameTest(oper) => Some((qual, name))
-      case Apply(Ident(oper), List(Literal(Constant(name)))) if nameTest(oper) => Some((EmptyTree, name))
-      case _ => None
+      case Apply(TypeApply(Select(qual, oper), _), List(LiteralNameOrAdapted(name))) if nameTest(oper) => Some((qual, name))
+      case Apply(Select(qual, oper), List(LiteralNameOrAdapted(name))) if nameTest(oper)               => Some((qual, name))
+      case Apply(Ident(oper), List(LiteralNameOrAdapted(name))) if nameTest(oper)                      => Some((EmptyTree, name))
+      case _                                                                                           => None
     }
   }
   object DynamicUpdate extends DynamicApplicationExtractor(_ == nme.updateDynamic)
@@ -920,6 +929,7 @@ abstract class TreeInfo {
   object DynamicApplicationNamed extends DynamicApplicationExtractor(_ == nme.applyDynamicNamed)
 
   object MacroImplReference {
+    @tailrec
     private def refPart(tree: Tree): Tree = tree match {
       case TypeApply(fun, _) => refPart(fun)
       case ref: RefTree => ref
@@ -948,7 +958,8 @@ abstract class TreeInfo {
     }
   }
 
-  def isNullaryInvocation(tree: Tree): Boolean =
+  @tailrec
+  final def isNullaryInvocation(tree: Tree): Boolean =
     tree.symbol != null && tree.symbol.isMethod && (tree match {
       case TypeApply(fun, _) => isNullaryInvocation(fun)
       case tree: RefTree => true
@@ -960,8 +971,147 @@ abstract class TreeInfo {
     sym != null && sym.isTermMacro && !sym.isErroneous
   }
 
-  def isMacroApplicationOrBlock(tree: Tree): Boolean = tree match {
+  @tailrec
+  final def isMacroApplicationOrBlock(tree: Tree): Boolean = tree match {
     case Block(_, expr) => isMacroApplicationOrBlock(expr)
     case tree => isMacroApplication(tree)
   }
+}
+
+// imported from scalamacros/paradise
+trait MacroAnnotionTreeInfo { self: TreeInfo =>
+  import global._
+  import definitions._
+  import build.{SyntacticClassDef, SyntacticTraitDef}
+
+  def primaryConstructorArity(tree: ClassDef): Int = treeInfo.firstConstructor(tree.impl.body) match {
+    case DefDef(_, _, _, params :: _, _, _) => params.length
+  }
+
+  def anyConstructorHasDefault(tree: ClassDef): Boolean = tree.impl.body exists {
+    case DefDef(_, nme.CONSTRUCTOR, _, paramss, _, _) => mexists(paramss)(_.mods.hasDefault)
+    case _                                            => false
+  }
+
+  def isMacroAnnotation(tree: ClassDef): Boolean = {
+    val clazz = tree.symbol
+    def isAnnotation = clazz isNonBottomSubClass AnnotationClass
+    def hasMacroTransformMethod = clazz.info.member(nme.macroTransform) != NoSymbol
+    clazz != null && isAnnotation && hasMacroTransformMethod
+  }
+
+  case class AnnotationZipper(annotation: Tree, annottee: Tree, owner: Tree)
+
+  // TODO: no immediate idea how to write this in a sane way
+  def getAnnotationZippers(tree: Tree): List[AnnotationZipper] = {
+    def loop[T <: Tree](tree: T, deep: Boolean): List[AnnotationZipper] = tree match {
+      case SyntacticClassDef(mods, name, tparams, constrMods, vparamss, earlyDefs, parents, selfdef, body) =>
+        val czippers = mods.annotations.map(ann => {
+          val mods1 = mods.mapAnnotations(_ diff List(ann))
+          val annottee = PatchedSyntacticClassDef(mods1, name, tparams, constrMods, vparamss, earlyDefs, parents, selfdef, body)
+          AnnotationZipper(ann, annottee, annottee)
+        })
+        if (!deep) czippers
+        else {
+          val tzippers = for {
+            tparam <- tparams
+            AnnotationZipper(ann, tparam1: TypeDef, _) <- loop(tparam, deep = false)
+            tparams1 = tparams.updated(tparams.indexOf(tparam), tparam1)
+          } yield AnnotationZipper(ann, tparam1, PatchedSyntacticClassDef(mods, name, tparams1, constrMods, vparamss, earlyDefs, parents, selfdef, body))
+          val vzippers = for {
+            vparams <- vparamss
+            vparam <- vparams
+            AnnotationZipper(ann, vparam1: ValDef, _) <- loop(vparam, deep = false)
+            vparams1 = vparams.updated(vparams.indexOf(vparam), vparam1)
+            vparamss1 = vparamss.updated(vparamss.indexOf(vparams), vparams1)
+          } yield AnnotationZipper(ann, vparam1, PatchedSyntacticClassDef(mods, name, tparams, constrMods, vparamss1, earlyDefs, parents, selfdef, body))
+          czippers ++ tzippers ++ vzippers
+        }
+      case SyntacticTraitDef(mods, name, tparams, earlyDefs, parents, selfdef, body) =>
+        val tdef = tree.asInstanceOf[ClassDef]
+        val czippers = mods.annotations.map(ann => {
+          val annottee = tdef.copy(mods = mods.mapAnnotations(_ diff List(ann)))
+          AnnotationZipper(ann, annottee, annottee)
+        })
+        if (!deep) czippers
+        else {
+          val tzippers = for {
+            tparam <- tparams
+            AnnotationZipper(ann, tparam1: TypeDef, _) <- loop(tparam, deep = false)
+            tparams1 = tparams.updated(tparams.indexOf(tparam), tparam1)
+          } yield AnnotationZipper(ann, tparam1, tdef.copy(tparams = tparams1))
+          czippers ++ tzippers
+        }
+      case mdef @ ModuleDef(mods, _, _) =>
+        mods.annotations.map(ann => {
+          val annottee = mdef.copy(mods = mods.mapAnnotations(_ diff List(ann)))
+          AnnotationZipper(ann, annottee, annottee)
+        })
+      case ddef @ DefDef(mods, _, tparams, vparamss, _, _) =>
+        val dzippers = mods.annotations.map(ann => {
+          val annottee = ddef.copy(mods = mods.mapAnnotations(_ diff List(ann)))
+          AnnotationZipper(ann, annottee, annottee)
+        })
+        if (!deep) dzippers
+        else {
+          val tzippers = for {
+            tparam <- tparams
+            AnnotationZipper(ann, tparam1: TypeDef, _) <- loop(tparam, deep = false)
+            tparams1 = tparams.updated(tparams.indexOf(tparam), tparam1)
+          } yield AnnotationZipper(ann, tparam1, ddef.copy(tparams = tparams1))
+          val vzippers = for {
+            vparams <- vparamss
+            vparam <- vparams
+            AnnotationZipper(ann, vparam1: ValDef, _) <- loop(vparam, deep = false)
+            vparams1 = vparams.updated(vparams.indexOf(vparam), vparam1)
+            vparamss1 = vparamss.updated(vparamss.indexOf(vparams), vparams1)
+          } yield AnnotationZipper(ann, vparam1, ddef.copy(vparamss = vparamss1))
+          dzippers ++ tzippers ++ vzippers
+        }
+      case vdef @ ValDef(mods, _, _, _) =>
+        mods.annotations.map(ann => {
+          val annottee = vdef.copy(mods = mods.mapAnnotations(_ diff List(ann)))
+          AnnotationZipper(ann, annottee, annottee)
+        })
+      case tdef @ TypeDef(mods, _, tparams, _) =>
+        val tzippers = mods.annotations.map(ann => {
+          val annottee = tdef.copy(mods = mods.mapAnnotations(_ diff List(ann)))
+          AnnotationZipper(ann, annottee, annottee)
+        })
+        if (!deep) tzippers
+        else {
+          val ttzippers = for {
+            tparam <- tparams
+            AnnotationZipper(ann, tparam1: TypeDef, _) <- loop(tparam, deep = false)
+            tparams1 = tparams.updated(tparams.indexOf(tparam), tparam1)
+          } yield AnnotationZipper(ann, tparam1, tdef.copy(tparams = tparams1))
+          tzippers ++ ttzippers
+        }
+      case _ =>
+        Nil
+    }
+    loop(tree, deep = true)
+  }
+
+  private object PatchedSyntacticClassDef {
+    def apply(mods: Modifiers, name: TypeName, tparams: List[Tree],
+              constrMods: Modifiers, vparamss: List[List[Tree]],
+              earlyDefs: List[Tree], parents: List[Tree], selfType: Tree, body: List[Tree]): ClassDef = {
+      // NOTE: works around SI-8771 and hopefully fixes https://github.com/scalamacros/paradise/issues/53 for good
+      SyntacticClassDef(mods, name, tparams, constrMods, vparamss.map(_.map(_.duplicate)), earlyDefs, parents, selfType, body)
+    }
+  }
+
+  // Return a pair consisting of (all statements up to and including superclass and trait constr calls, rest)
+  final def splitAtSuper(stats: List[Tree], classOnly: Boolean): (List[Tree], List[Tree]) = {
+    @tailrec
+    def isConstr(tree: Tree): Boolean = tree match {
+      case Block(_, expr) => isConstr(expr) // scala/bug#6481 account for named argument blocks
+      case _              => (tree.symbol ne null) && (if (classOnly) tree.symbol.isClassConstructor else tree.symbol.isConstructor)
+    }
+    val (pre, rest0)       = stats span (!isConstr(_))
+    val (supercalls, rest) = rest0 span (isConstr(_))
+    (pre ::: supercalls, rest)
+  }
+
 }

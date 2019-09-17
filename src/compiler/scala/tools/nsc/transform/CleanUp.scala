@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -9,7 +16,6 @@ package transform
 import symtab._
 import Flags._
 import scala.collection._
-import scala.language.postfixOps
 
 abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
   import global._
@@ -21,8 +27,8 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
   val phaseName: String = "cleanup"
 
   /* used in GenBCode: collects ClassDef symbols owning a main(Array[String]) method */
-  private var entryPoints: List[Symbol] = Nil
-  def getEntryPoints: List[Symbol] = entryPoints sortBy ("" + _.fullName) // For predictably ordered error messages.
+  private val entryPoints = perRunCaches.newSet[Symbol]() // : List[Symbol] = Nil
+  def getEntryPoints: List[String] = entryPoints.toList.map(_.fullName('.')).sorted
 
   protected def newTransformer(unit: CompilationUnit): Transformer =
     new CleanUpTransformer(unit)
@@ -31,7 +37,14 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
     private val newStaticMembers      = mutable.Buffer.empty[Tree]
     private val newStaticInits        = mutable.Buffer.empty[Tree]
     private val symbolsStoredAsStatic = mutable.Map.empty[String, Symbol]
-    private def clearStatics() {
+    private var transformListApplyLimit = 8
+    private def reducingTransformListApply[A](depth: Int)(body: => A): A = {
+      val saved = transformListApplyLimit
+      transformListApplyLimit -= depth
+      try body
+      finally transformListApplyLimit = saved
+    }
+    private def clearStatics(): Unit = {
       newStaticMembers.clear()
       newStaticInits.clear()
       symbolsStoredAsStatic.clear()
@@ -74,7 +87,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
 
         val typedPos = typedWithPos(ad.pos) _
 
-        assert(ad.symbol.isPublic)
+        assert(ad.symbol.isPublic, "Must be public")
         var qual: Tree = qual0
 
         /* ### CREATING THE METHOD CACHE ### */
@@ -85,7 +98,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
           methSym setInfoAndEnter MethodType(params, MethodClass.tpe)
 
           val methDef = typedPos(DefDef(methSym, forBody(methSym, params.head)))
-          newStaticMembers append transform(methDef)
+          newStaticMembers += transform(methDef)
           methSym
         }
 
@@ -186,7 +199,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
           val runDefinitions = currentRun.runDefinitions
           import runDefinitions._
 
-          gen.evalOnce(qual, currentOwner, unit) { qual1 =>
+          gen.evalOnce(qual, currentOwner, localTyper.fresh) { qual1 =>
             /* Some info about the type of the method being called. */
             val methSym       = ad.symbol
             val boxedResType  = toBoxedType(resType)      // Int -> Integer
@@ -245,7 +258,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
               // reflective method call machinery
               val invokeName  = MethodClass.tpe member nme.invoke_                                  // scala.reflect.Method.invoke(...)
               def cache       = REF(reflectiveMethodCache(ad.symbol.name.toString, paramTypes))     // cache Symbol
-              def lookup      = Apply(cache, List(qual1() GETCLASS()))                                // get Method object from cache
+              def lookup      = Apply(cache, List(qual1().GETCLASS()))                                // get Method object from cache
               def invokeArgs  = ArrayValue(TypeTree(ObjectTpe), params)                       // args for invocation
               def invocation  = (lookup DOT invokeName)(qual1(), invokeArgs)                        // .invoke(qual1, ...)
 
@@ -255,7 +268,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
               def catchBody   = Throw(Apply(Select(Ident(invokeExc), nme.getCause), Nil))
 
               // try { method.invoke } catch { case e: InvocationTargetExceptionClass => throw e.getCause() }
-              fixResult(TRY (invocation) CATCH { CASE (catchVar) ==> catchBody } ENDTRY)
+              fixResult(TRY (invocation) CATCH { CASE (catchVar) ==> catchBody } FINALLY END)
             }
 
             /* A possible primitive method call, represented by methods in BoxesRunTime. */
@@ -285,7 +298,7 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
              * so we have to generate both kinds of code.
              */
             def genArrayCallWithTest =
-              IF ((qual1() GETCLASS()) DOT nme.isArray) THEN genArrayCall ELSE genDefaultCall
+              IF ((qual1().GETCLASS()) DOT nme.isArray) THEN genArrayCall ELSE genDefaultCall
 
             localTyper typed (
               if (isMaybeBoxed && isJavaValueMethod) genValueCallWithTest
@@ -325,7 +338,8 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
               (mparams, resType)
             case tpe @ OverloadedType(pre, alts) =>
               reporter.warning(ad.pos, s"Overloaded type reached the backend! This is a bug in scalac.\n     Symbol: ${ad.symbol}\n  Overloads: $tpe\n  Arguments: " + ad.args.map(_.tpe))
-              alts filter (_.paramss.flatten.size == params.length) map (_.tpe) match {
+              val fittingAlts = alts collect { case alt if sumSize(alt.paramss, 0) == params.length => alt.tpe }
+              fittingAlts match {
                 case mt @ MethodType(mparams, resType) :: Nil =>
                   reporter.warning(NoPosition, "Only one overload has the right arity, proceeding with overload " + mt)
                   (mparams, resType)
@@ -370,11 +384,11 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
     }
 
     override def transform(tree: Tree): Tree = tree match {
-      case _: ClassDef if genBCode.isJavaEntryPoint(tree.symbol, currentUnit) =>
+      case _: ClassDef if genBCode.codeGen.CodeGenImpl.isJavaEntryPoint(tree.symbol, currentUnit, settings.mainClass.valueSetByUser.map(_.toString)) =>
         // collecting symbols for entry points here (as opposed to GenBCode where they are used)
         // has the advantage of saving an additional pass over all ClassDefs.
-        entryPoints ::= tree.symbol
-        super.transform(tree)
+        entryPoints += tree.symbol
+        tree.transform(this)
 
       /* Transforms dynamic calls (i.e. calls to methods that are undefined
        * in the erased type space) to -- dynamically -- unsafe calls using
@@ -454,23 +468,35 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
       case Apply(fn @ Select(qual, _), (arg @ Literal(Constant(symname: String))) :: Nil)
         if treeInfo.isQualifierSafeToElide(qual) && fn.symbol == Symbol_apply && !currentClass.isTrait =>
 
-        super.transform(treeCopy.ApplyDynamic(tree, atPos(fn.pos)(Ident(SymbolLiteral_dummy).setType(SymbolLiteral_dummy.info)), LIT(SymbolLiteral_bootstrap) :: arg :: Nil))
+        treeCopy.ApplyDynamic(tree, atPos(fn.pos)(Ident(SymbolLiteral_dummy).setType(SymbolLiteral_dummy.info)), LIT(SymbolLiteral_bootstrap) :: arg :: Nil).transform(this)
 
       // Drop the TypeApply, which was used in Erasure to make `synchronized { ... } ` erase like `...`
       // (and to avoid boxing the argument to the polymorphic `synchronized` method).
       case app@Apply(TypeApply(fun, _), args) if fun.symbol == Object_synchronized =>
-        super.transform(treeCopy.Apply(app, fun, args))
+        treeCopy.Apply(app, fun, args).transform(this)
 
-      // Replaces `Array(Predef.wrapArray(ArrayValue(...).$asInstanceOf[...]), <tag>)`
+      // Replaces `Array(<Predef-or-ScalaRunTime>.wrapArray(ArrayValue(...).$asInstanceOf[...]), <tag>)`
       // with just `ArrayValue(...).$asInstanceOf[...]`
       //
-      // See SI-6611; we must *only* do this for literal vararg arrays.
-      case Apply(appMeth, List(Apply(wrapRefArrayMeth, List(arg @ StripCast(ArrayValue(_, _)))), _))
-      if wrapRefArrayMeth.symbol == currentRun.runDefinitions.Predef_wrapRefArray && appMeth.symbol == ArrayModule_genericApply =>
-        super.transform(arg)
-      case Apply(appMeth, List(elem0, Apply(wrapArrayMeth, List(rest @ ArrayValue(elemtpt, _)))))
-      if wrapArrayMeth.symbol == Predef_wrapArray(elemtpt.tpe) && appMeth.symbol == ArrayModule_apply(elemtpt.tpe) =>
-        super.transform(treeCopy.ArrayValue(rest, rest.elemtpt, elem0 :: rest.elems))
+      // See scala/bug#6611; we must *only* do this for literal vararg arrays.
+      case Apply(appMeth, Apply(wrapRefArrayMeth, (arg @ StripCast(ArrayValue(_, _))) :: Nil) :: _ :: Nil)
+      if wrapRefArrayMeth.symbol == currentRun.runDefinitions.wrapVarargsRefArrayMethod && appMeth.symbol == ArrayModule_genericApply =>
+        arg.transform(this)
+      case Apply(appMeth, elem0 :: Apply(wrapArrayMeth, (rest @ ArrayValue(elemtpt, _)) :: Nil) :: Nil)
+      if wrapArrayMeth.symbol == wrapVarargsArrayMethod(elemtpt.tpe) && appMeth.symbol == ArrayModule_apply(elemtpt.tpe) =>
+        treeCopy.ArrayValue(rest, rest.elemtpt, elem0 :: rest.elems).transform(this)
+
+      // List(a, b, c) ~> new ::(a, new ::(b, new ::(c, Nil)))
+      case Apply(appMeth @ Select(qual, _), List(Apply(wrapArrayMeth, List(StripCast(rest @ ArrayValue(elemtpt, _))))))
+      if wrapArrayMeth.symbol == currentRun.runDefinitions.wrapVarargsRefArrayMethod
+        && currentRun.runDefinitions.isListApply(appMeth) && rest.elems.lengthIs < transformListApplyLimit =>
+        val consed = rest.elems.reverse.foldLeft(gen.mkAttributedRef(NilModule): Tree)(
+          (acc, elem) => New(ConsClass, elem, acc)
+        )
+        // Limiting extra stack frames consumed by generated code
+        reducingTransformListApply(rest.elems.length) {
+          super.transform(localTyper.typedPos(tree.pos)(consed))
+        }
 
       case _ =>
         super.transform(tree)

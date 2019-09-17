@@ -8,10 +8,11 @@ import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
 import scala.tools.asm.Opcodes._
-import scala.tools.partest.ASMConverters._
-import scala.tools.testing.AssertUtil._
-import scala.tools.testing.BytecodeTesting._
-import scala.tools.testing.ClearAfterClass
+import scala.tools.asm.tree.ClassNode
+import scala.tools.testkit.ASMConverters._
+import scala.tools.testkit.AssertUtil._
+import scala.tools.testkit.BytecodeTesting._
+import scala.tools.testkit.ClearAfterClass
 
 @RunWith(classOf[JUnit4])
 class UnreachableCodeTest extends ClearAfterClass {
@@ -23,7 +24,7 @@ class UnreachableCodeTest extends ClearAfterClass {
 
   def assertEliminateDead(code: (Instruction, Boolean)*): Unit = {
     val method = genMethod()(code.map(_._1): _*)
-    dceCompiler.global.genBCode.bTypes.localOpt.removeUnreachableCodeImpl(method, "C")
+    dceCompiler.global.genBCode.postProcessor.localOpt.removeUnreachableCodeImpl(method, "C")
     val nonEliminated = instructionsFromMethod(method)
     val expectedLive = code.filter(_._2).map(_._1).toList
     assertSameCode(nonEliminated, expectedLive)
@@ -244,5 +245,22 @@ class UnreachableCodeTest extends ClearAfterClass {
     val cDCE = dceCompiler.compileClass(code)
     assertSameSummary(getMethod(cDCE, "t3"), List(ALOAD, NEW, DUP, LDC, "<init>", ATHROW))
     assertSameSummary(getMethod(cDCE, "t4"), List(ALOAD, ALOAD, "nt", ATHROW))
+  }
+
+  @Test
+  def patmatDefaultLineNumber(): Unit = {
+    val code =
+      """class Test {
+        |  def test = (this: AnyRef) match {
+        |    case _: String =>
+        |      "line4" // the synthetic `throw new MatchError` used to be positioned, here, despite the fact that patmat positions it at line 3.
+        |  }
+        |}
+        |""".stripMargin
+    val test: ClassNode = dceCompiler.compileClass(code)
+    val i = getAsmMethod(test, "test")
+    val instr = findInstrs(i, "NEW scala/MatchError").head
+    val lineNumber = BytecodeUtils.previousLineNumber(instr)
+    assertEquals(Some(2), lineNumber)
   }
 }

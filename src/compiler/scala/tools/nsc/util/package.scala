@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala
@@ -8,6 +15,7 @@ package tools
 package nsc
 
 import java.io.{ OutputStream, PrintStream, ByteArrayOutputStream, PrintWriter, StringWriter, Reader }
+import scala.collection.immutable.ArraySeq
 
 package object util {
   // forwarder for old code that builds against 2.9 and 2.10
@@ -39,9 +47,16 @@ package object util {
    *  which were created during its execution.
    */
   def trackingThreads[T](body: => T): (T, Seq[Thread]) = {
-    val ts1    = sys.allThreads()
+    def allThreads(): IndexedSeq[Thread] = {
+      val tarray = new Array[Thread](Thread.activeCount())
+      val got    = Thread.enumerate(tarray)
+
+      ArraySeq.unsafeWrapArray(tarray.take(got))
+    }
+
+    val ts1    = allThreads()
     val result = body
-    val ts2    = sys.allThreads()
+    val ts2    = allThreads()
 
     (result, ts2 filterNot (ts1 contains _))
   }
@@ -90,7 +105,7 @@ package object util {
     /** Format the stack trace, returning the prefix consisting of frames that satisfy
      *  a given predicate.
      *  The format is similar to the typical case described in the Javadoc
-     *  for [[java.lang.Throwable#printStackTrace]].
+     *  for [[java.lang.Throwable#printStackTrace()*]].
      *  If a stack trace is truncated, it will be followed by a line of the form
      *  `... 3 elided`, by analogy to the lines `... 3 more` which indicate
      *  shared stack trace segments.
@@ -101,8 +116,8 @@ package object util {
 
   lazy val trace = new SimpleTracer(System.out)
 
-  // These four deprecated since 2.10.0 are still used in (at least)
-  // the sbt 0.12.4 compiler interface.
+  // These four deprecated since 2.10.0 are still used in
+  // the sbt 0.13 compiler interface.
   @deprecated("Moved to scala.reflect.internal.util.Position", "2.10.0")
   type Position = scala.reflect.internal.util.Position
   @deprecated("Moved to scala.reflect.internal.util.NoPosition", "2.10.0")

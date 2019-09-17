@@ -1,7 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2007-2013 LAMP/EPFL
- * @author Anders Bach Nielsen
- * @version 1.0
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -20,7 +26,7 @@ trait PhaseAssembly {
    * Aux data structure for solving the constraint system
    * The dependency graph container with helper methods for node and edge creation
    */
-  private class DependencyGraph {
+  private[nsc] class DependencyGraph {
 
     /** Simple edge with to and from refs */
     case class Edge(var frm: Node, var to: Node, var hard: Boolean)
@@ -63,14 +69,14 @@ trait PhaseAssembly {
      * node object does not exits, then create it.
      */
     def getNodeByPhase(name: String): Node =
-      nodes.getOrElseUpdate(name, new Node(name))
+      nodes.getOrElseUpdate(name, Node(name))
 
     /* Connect the frm and to nodes with an edge and make it soft.
      * Also add the edge object to the set of edges, and to the dependency
      * list of the nodes
      */
-    def softConnectNodes(frm: Node, to: Node) {
-      val e = new Edge(frm, to, false)
+    def softConnectNodes(frm: Node, to: Node): Unit = {
+      val e = Edge(frm, to, false)
       this.edges += e
 
       frm.after += e
@@ -81,8 +87,8 @@ trait PhaseAssembly {
      * Also add the edge object to the set of edges, and to the dependency
      * list of the nodes
      */
-    def hardConnectNodes(frm: Node, to: Node) {
-      val e = new Edge(frm, to, true)
+    def hardConnectNodes(frm: Node, to: Node): Unit = {
+      val e = Edge(frm, to, true)
       this.edges += e
 
       frm.after += e
@@ -93,7 +99,7 @@ trait PhaseAssembly {
      * names are sorted alphabetical at each level, into the compiler phase list
      */
     def compilerPhaseList(): List[SubComponent] =
-      nodes.values.toList filter (_.level > 0) sortBy (x => (x.level, x.phasename)) flatMap (_.phaseobj) flatten
+      nodes.values.toList.filter(_.level > 0).sortBy(x => (x.level, x.phasename)).flatMap(_.phaseobj).flatten
 
     /* Test if there are cycles in the graph, assign levels to the nodes
      * and collapse hard links into nodes
@@ -104,18 +110,31 @@ trait PhaseAssembly {
         throw new FatalError(s"Cycle in phase dependencies detected at ${node.phasename}, created phase-cycle.dot")
       }
 
-      if (node.level < lvl) node.level = lvl
-
-      var hls = Nil ++ node.before.filter(_.hard)
-      while (hls.size > 0) {
-        for (hl <- hls) {
-          node.phaseobj = Some(node.phaseobj.get ++ hl.frm.phaseobj.get)
-          node.before = hl.frm.before
-          nodes -= hl.frm.phasename
-          edges -= hl
-          for (edge <- node.before) edge.to = node
+      val initLevel = node.level
+      val levelUp = initLevel < lvl
+      if (levelUp) {
+        node.level = lvl
+      }
+      if (initLevel != 0) {
+        if (!levelUp) {
+          // no need to revisit
+          node.visited = false
+          return
         }
-        hls = Nil ++ node.before.filter(_.hard)
+      }
+      var befores = node.before
+      def hasHardLinks() = befores.exists(_.hard)
+      while (hasHardLinks()) {
+        for (hl <- befores) {
+          if (hl.hard) {
+            node.phaseobj = Some(node.phaseobj.get ++ hl.frm.phaseobj.get)
+            node.before = hl.frm.before
+            nodes -= hl.frm.phasename
+            edges -= hl
+            for (edge <- node.before) edge.to = node
+          }
+        }
+        befores = node.before
       }
       node.visited = true
 
@@ -130,7 +149,7 @@ trait PhaseAssembly {
      * need to check that it's the only dependency. If not, then we will promote the
      * other dependencies down
      */
-    def validateAndEnforceHardlinks() {
+    def validateAndEnforceHardlinks(): Unit = {
       var hardlinks = edges.filter(_.hard)
       for (hl <- hardlinks) {
         if (hl.frm.after.size > 1) {
@@ -174,7 +193,7 @@ trait PhaseAssembly {
      *  `Inform` with warnings, if an external phase has a
      *  dependency on something that is dropped.
      */
-    def removeDanglingNodes() {
+    def removeDanglingNodes(): Unit = {
       for (node <- nodes.values filter (_.phaseobj.isEmpty)) {
         val msg = "dropping dependency on node with no phase object: "+node.phasename
         informProgress(msg)
@@ -228,7 +247,7 @@ trait PhaseAssembly {
   /** Given the phases set, will build a dependency graph from the phases set
    *  Using the aux. method of the DependencyGraph to create nodes and edges.
    */
-  private def phasesSetToDepGraph(phsSet: mutable.HashSet[SubComponent]): DependencyGraph = {
+  private[nsc] def phasesSetToDepGraph(phsSet: Iterable[SubComponent]): DependencyGraph = {
     val graph = new DependencyGraph()
 
     for (phs <- phsSet) {

@@ -1,3 +1,15 @@
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
+
 package scala
 package reflect
 package internal
@@ -14,6 +26,11 @@ trait StdAttachments {
     def setAttachments(attachments: scala.reflect.macros.Attachments { type Pos = Position }): this.type = { rawatt = attachments; this }
     def updateAttachment[T: ClassTag](attachment: T): this.type = { rawatt = rawatt.update(attachment); this }
     def removeAttachment[T: ClassTag]: this.type = { rawatt = rawatt.remove[T]; this }
+    def getAndRemoveAttachment[T: ClassTag]: Option[T] = {
+      val r = attachments.get[T]
+      if (r.nonEmpty) removeAttachment[T]
+      r
+    }
     def hasAttachment[T: ClassTag]: Boolean = rawatt.contains[T]
 
     // cannot be final due to SynchronizedSymbols
@@ -46,16 +63,27 @@ trait StdAttachments {
     *
     * @param samTp the expected type that triggered sam conversion (may be a subtype of the type corresponding to sam's owner)
     * @param sam the single abstract method implemented by the Function we're attaching this to
-    *
-    * @since 2.12.0-M4
+    * @param synthCls the (synthetic) class representing the eventual implementation class (spun at runtime by LMF on the JVM)
     */
-  case class SAMFunction(samTp: Type, sam: Symbol) extends PlainAttachment
+  case class SAMFunction(samTp: Type, sam: Symbol, synthCls: Symbol) extends PlainAttachment
 
   case object DelambdafyTarget extends PlainAttachment
 
   /** When present, indicates that the host `Ident` has been created from a backquoted identifier.
    */
   case object BackquotedIdentifierAttachment extends PlainAttachment
+
+  /** A pattern binding exempt from unused warning.
+   *
+   *  Its host `Ident` has been created from a pattern2 binding, `case x @ p`.
+   *  In the absence of named parameters in patterns, allows nuanced warnings for unused variables.
+   *  Hence, `case X(x = _) =>` would not warn; for now, `case X(x @ _) =>` is documentary if x is unused.
+   */
+  case object NoWarnAttachment extends PlainAttachment
+
+  /** Indicates that a `ValDef` was synthesized from a pattern definition, `val P(x)`.
+   */
+  case object PatVarDefAttachment extends PlainAttachment
 
   /** Identifies trees are either result or intermediate value of for loop desugaring.
    */
@@ -87,4 +115,8 @@ trait StdAttachments {
     * error to indicate that the earlier observation was incomplete.
     */
   case object KnownDirectSubclassesCalled extends PlainAttachment
+
+  class QualTypeSymAttachment(val sym: Symbol)
+
+  case object ConstructorNeedsFence extends PlainAttachment
 }

@@ -1,4 +1,14 @@
-/* NSC -- new Scala compiler -- Copyright 2007-2013 LAMP/EPFL */
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
 
 package scala
 package tools.nsc
@@ -9,7 +19,6 @@ import base.comment._
 import diagram._
 
 import scala.collection._
-import scala.tools.nsc.doc.html.page.diagram.{DotRunner}
 import scala.util.matching.Regex
 import scala.reflect.macros.internal.macroImpl
 import symtab.Flags
@@ -28,14 +37,9 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
                with MemberLookup =>
 
   import global._
-  import definitions.{ ObjectClass, NothingClass, AnyClass, AnyValClass, AnyRefClass }
+  import definitions.{ ObjectClass, NothingClass, AnyClass, AnyValClass, AnyRefClass, AnnotationClass }
   import rootMirror.{ RootPackage, EmptyPackage }
-
-  // Defaults for member grouping, that may be overridden by the template
-  val defaultGroup = "Ungrouped"
-  val defaultGroupName = "Ungrouped"
-  val defaultGroupDesc = None
-  val defaultGroupPriority = 1000
+  import ModelFactory._
 
   def templatesCount = docTemplatesCache.count(_._2.isDocTemplate) - droppedPackages.size
 
@@ -48,7 +52,6 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
       thisFactory.universe = thisUniverse
       val settings = thisFactory.settings
       val rootPackage = modelCreation.createRootPackage
-      lazy val dotRunner = new DotRunner(settings)
     }
     _modelFinished = true
     // complete the links between model entities, everything that couldn't have been done before
@@ -83,7 +86,7 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
     def inTemplate: TemplateImpl = inTpl
     def toRoot: List[EntityImpl] = this :: inTpl.toRoot
     def qualifiedName = name
-    def annotations = sym.annotations.filterNot(_.tpe =:= typeOf[macroImpl]).map(makeAnnotation)
+    def annotations = sym.annotations.filterNot(_.atp =:= typeOf[macroImpl]).map(makeAnnotation)
     def inPackageObject: Boolean = sym.owner.isModuleClass && sym.owner.sourceModule.isPackageObject
     def isType = sym.name.isTypeName
   }
@@ -125,13 +128,16 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
       else if (sym.isProtectedLocal) ProtectedInInstance()
       else {
         val qual =
-          if (sym.hasAccessBoundary)
-            Some(makeTemplate(sym.privateWithin))
-          else None
-        if (sym.isPrivate) PrivateInTemplate(inTpl)
-        else if (sym.isProtected) ProtectedInTemplate(qual getOrElse inTpl)
+          if (sym.hasAccessBoundary) {
+            val qualTpl = makeTemplate(sym.privateWithin)
+            if (qualTpl != inTpl) Some(qualTpl)
+            else None
+          } else None
+        def tp(c: TemplateImpl) = makeType(c.sym.tpe, inTpl)
+        if (sym.isPrivate) PrivateInTemplate(None)
+        else if (sym.isProtected) ProtectedInTemplate(qual.map(tp))
         else qual match {
-          case Some(q) => PrivateInTemplate(q)
+          case Some(q) => PrivateInTemplate(Some(tp(q)))
           case None => Public()
         }
       }
@@ -209,7 +215,7 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
       }
 
       def tParams(mbr: Any): String = mbr match {
-        case hk: HigherKinded if !hk.typeParams.isEmpty =>
+        case hk: HigherKinded if hk.typeParams.nonEmpty =>
           def boundsToString(hi: Option[TypeEntity], lo: Option[TypeEntity]): String = {
             def bound0(bnd: Option[TypeEntity], pre: String): String = bnd match {
               case None => ""
@@ -284,24 +290,30 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
 
     protected def reprSymbol: Symbol = sym
 
-    def inSource =
-      if (reprSymbol.sourceFile != null && ! reprSymbol.isSynthetic)
-        Some((reprSymbol.sourceFile, reprSymbol.pos.line))
+    def inSource = {
+      val sourceFile = reprSymbol.sourceFile
+      if (sourceFile != null && !reprSymbol.isSynthetic)
+        Some((sourceFile, reprSymbol.pos.line))
       else
         None
+    }
 
     def sourceUrl = {
       def fixPath(s: String) = s.replaceAll("\\" + java.io.File.separator, "/")
       val assumedSourceRoot  = fixPath(settings.sourcepath.value) stripSuffix "/"
 
       if (!settings.docsourceurl.isDefault)
-        inSource map { case (file, _) =>
-          val filePath = fixPath(file.path).replaceFirst("^" + assumedSourceRoot, "").stripSuffix(".scala")
+        inSource map { case (file, line) =>
+          val filePathExt = fixPath(file.path).replaceFirst("^" + assumedSourceRoot, "")
+          val (filePath, fileExt) = filePathExt.splitAt(filePathExt.indexOf(".", filePathExt.lastIndexOf("/")))
           val tplOwner = this.inTemplate.qualifiedName
           val tplName = this.name
-          val patches = new Regex("""€\{(FILE_PATH|TPL_OWNER|TPL_NAME)\}""")
+          val patches = new Regex("""€\{(FILE_PATH|FILE_EXT|FILE_PATH_EXT|FILE_LINE|TPL_OWNER|TPL_NAME)\}""")
           def substitute(name: String): String = name match {
             case "FILE_PATH" => filePath
+            case "FILE_EXT" => fileExt
+            case "FILE_PATH_EXT" => filePathExt
+            case "FILE_LINE" => line.toString
             case "TPL_OWNER" => tplOwner
             case "TPL_NAME" => tplName
           }
@@ -355,7 +367,7 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
     // the members generated by the symbols in memberSymsEager
     val ownMembers      = (memberSymsEager.flatMap(makeMember(_, None, this)))
 
-    // all the members that are documentented PLUS the members inherited by implicit conversions
+    // all the members that are documented PLUS the members inherited by implicit conversions
     var members: List[MemberImpl] = ownMembers
 
     def templates       = members collect { case c: TemplateEntity with MemberEntity => c }
@@ -555,14 +567,15 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
    * package object abstraction and placing members directly in the package.
    *
    * Here's the explanation of what we do. The code:
-   *
+   * {{{
    * package foo {
    *   object `package` {
    *     class Bar
    *   }
    * }
-   *
+   * }}}
    * will yield this Symbol structure:
+   * <pre>
    *                                       +---------+ (2)
    *                                       |         |
    * +---------------+         +---------- v ------- | ---+                              +--------+ (2)
@@ -570,11 +583,12 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
    * +---------------+         | +------------------ | -+ |         +------------------- v ---+   |
    *                           | | package object foo#3 <-----(1)---- module class package#4  |   |
    *                           | +----------------------+ |         | +---------------------+ |   |
-   *                           +--------------------------+         | | class package$Bar#5 | |   |
+   *                           +--------------------------+         | | class package\$Bar#5 | |   |
    *                                                                | +----------------- | -+ |   |
    *                                                                +------------------- | ---+   |
    *                                                                                     |        |
    *                                                                                     +--------+
+   * </pre>
    * (1) sourceModule
    * (2) you get out of owners with .owner
    *
@@ -604,7 +618,7 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
       case Some(root: PackageImpl) => root
       case _ => modelCreation.createTemplate(RootPackage, null) match {
         case Some(root: PackageImpl) => root
-        case _ => sys.error("Scaladoc: Unable to create root package!")
+        case _ => throw new IllegalStateException("Scaladoc: Unable to create root package!")
       }
     }
 
@@ -638,10 +652,12 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
           new DocTemplateImpl(bSym, inTpl) with Object {}
         else if (bSym.isTrait)
           new DocTemplateImpl(bSym, inTpl) with Trait {}
+        else if (bSym.isClass && bSym.asClass.baseClasses.contains(AnnotationClass))
+          new DocTemplateImpl(bSym, inTpl) with model.AnnotationClass {}
         else if (bSym.isClass || bSym == AnyRefClass)
           new DocTemplateImpl(bSym, inTpl) with Class {}
         else
-          sys.error("'" + bSym + "' isn't a class, trait or object thus cannot be built as a documentable template.")
+          throw new IllegalArgumentException(s"'$bSym' isn't a class, trait or object thus cannot be built as a documentable template.")
       }
 
       val bSym = normalizeTemplate(aSym)
@@ -681,7 +697,7 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
               } else
                 Some(pack)
             case _ =>
-              sys.error("'" + bSym + "' must be in a package")
+              throw new IllegalArgumentException(s"'$bSym' must be in a package")
           }
       else {
         // no class inheritance at this point
@@ -708,7 +724,7 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
         else if (bSym.isClass || (bSym.isAliasType && bSym.tpe.typeSymbol.isClass))
           new MemberTemplateImpl(bSym, inTpl) with Class {}
         else
-          sys.error("'" + bSym + "' isn't a class, trait or object thus cannot be built as a member template.")
+          throw new IllegalArgumentException(s"'$bSym' isn't a class, trait or object thus cannot be built as a member template.")
       }
 
       assert(modelFinished)
@@ -789,7 +805,7 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
       Nil
     else {
       val allSyms = useCases(aSym, inTpl.sym) map { case (bSym, bComment, bPos) =>
-        docComments.put(bSym, DocComment(bComment, bPos)) // put the comment in the list, don't parse it yet, closes SI-4898
+        docComments.put(bSym, DocComment(bComment, bPos)) // put the comment in the list, don't parse it yet, closes scala/bug#4898
         bSym
       }
 
@@ -797,7 +813,7 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
       if (allSyms.isEmpty)
         member.toList
       else
-        // Use cases replace the original definitions - SI-5054
+        // Use cases replace the original definitions - scala/bug#5054
         allSyms flatMap { makeMember0(_, member) }
     }
   }
@@ -883,10 +899,11 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
       override val name = newName
       def defaultValue =
         if (aSym.hasDefault) {
+          val sourceFile = aSym.sourceFile
           // units.filter should return only one element
-          (currentRun.units filter (_.source.file == aSym.sourceFile)).toList match {
+          (currentRun.units filter (_.source.file == sourceFile)).toList match {
             case List(unit) =>
-              // SI-4922 `sym == aSym` is insufficient if `aSym` is a clone of symbol
+              // scala/bug#4922 `sym == aSym` is insufficient if `aSym` is a clone of symbol
               //         of the parameter in the tree, as can happen with type parameterized methods.
               def isCorrespondingParam(sym: Symbol) = (
                 sym != null &&
@@ -909,15 +926,12 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
 
   /** */
   def makeTypeInTemplateContext(aType: Type, inTpl: TemplateImpl, dclSym: Symbol): TypeEntity = {
-    def ownerTpl(sym: Symbol): Symbol =
-      if (sym.isClass || sym.isModule || sym == NoSymbol) sym else ownerTpl(sym.owner)
-    val tpe =
-      if (thisFactory.settings.useStupidTypes) aType else {
-        def ownerTpl(sym: Symbol): Symbol =
-          if (sym.isClass || sym.isModule || sym == NoSymbol) sym else ownerTpl(sym.owner)
-        val fixedSym = if (inTpl.sym.isModule) inTpl.sym.moduleClass else inTpl.sym
-        aType.asSeenFrom(fixedSym.thisType, ownerTpl(dclSym))
-      }
+    val tpe = {
+      def ownerTpl(sym: Symbol): Symbol =
+        if (sym.isClass || sym.isModule || sym == NoSymbol) sym else ownerTpl(sym.owner)
+      val fixedSym = if (inTpl.sym.isModule) inTpl.sym.moduleClass else inTpl.sym
+      aType.asSeenFrom(fixedSym.thisType, ownerTpl(dclSym))
+    }
     makeType(tpe, inTpl)
   }
 
@@ -969,7 +983,7 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
     while ((sym1 != NoSymbol) && (path.isEmpty || !stop(sym1))) {
       val sym1Norm = normalizeTemplate(sym1)
       if (!sym1.sourceModule.isPackageObject && sym1Norm != RootPackage) {
-        if (path.length != 0)
+        if (path.nonEmpty)
           path.insert(0, ".")
         path.insert(0, sym1Norm.nameString)
         // path::= sym1Norm
@@ -1000,24 +1014,20 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
     (!sym.isModule || sym.moduleClass.isInitialized) &&
     // documenting only public and protected members
     localShouldDocument(sym) &&
-    // Only this class's constructors are part of its members, inherited constructors are not.
-    (!sym.isConstructor || sym.owner == inTpl.sym) &&
-    // If the @bridge annotation overrides a normal member, show it
-    !isPureBridge(sym)
+    // Only this class's constructors are part of its members; inherited constructors are not.
+    (!sym.isConstructor || sym.owner == inTpl.sym)
   }
 
   def isEmptyJavaObject(aSym: Symbol): Boolean =
     aSym.isModule && aSym.isJavaDefined &&
     aSym.info.members.exists(s => localShouldDocument(s) && (!s.isConstructor || s.owner == aSym))
 
-  def localShouldDocument(aSym: Symbol): Boolean =
-    !aSym.isPrivate && (aSym.isProtected || aSym.privateWithin == NoSymbol) && !aSym.isSynthetic
-
-  /** Filter '@bridge' methods only if *they don't override non-bridge methods*. See SI-5373 for details */
-  def isPureBridge(sym: Symbol) = sym.isBridge && sym.allOverriddenSymbols.forall(_.isBridge)
-
-  // the classes that are excluded from the index should also be excluded from the diagrams
-  def classExcluded(clazz: TemplateEntity): Boolean = settings.hardcoded.isExcluded(clazz.qualifiedName)
+  def localShouldDocument(aSym: Symbol): Boolean = {
+    // For `private[X]`, isPrivate is false (while for protected[X], isProtected is true)
+    def isPrivate = aSym.isPrivate || !aSym.isProtected && aSym.privateWithin != NoSymbol
+    // for private, only document if enabled in settings and not top-level
+    !aSym.isSynthetic && (!isPrivate || settings.visibilityPrivate.value && !aSym.isTopLevel)
+  }
 
   // the implicit conversions that are excluded from the pages should not appear in the diagram
   def implicitExcluded(convertorMethod: String): Boolean = settings.hiddenImplicits(convertorMethod)
@@ -1028,4 +1038,11 @@ class ModelFactory(val global: Global, val settings: doc.Settings) {
     (bSym.isAliasType || bSym.isAbstractType) &&
     { val rawComment = global.expandedDocComment(bSym, inTpl.sym)
       rawComment.contains("@template") || rawComment.contains("@documentable") }
+}
+object ModelFactory {
+  // Defaults for member grouping, that may be overridden by the template
+  val defaultGroup = "Ungrouped"
+  val defaultGroupName = "Ungrouped"
+  val defaultGroupDesc = None
+  val defaultGroupPriority = 1000
 }

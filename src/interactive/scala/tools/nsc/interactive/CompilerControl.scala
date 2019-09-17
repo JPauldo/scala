@@ -1,7 +1,15 @@
-/* NSC -- new Scala compiler
- * Copyright 2009-2013 Typesafe/Scala Solutions and LAMP/EPFL
- * @author Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
+
 package scala.tools.nsc
 package interactive
 
@@ -65,7 +73,7 @@ trait CompilerControl { self: Global =>
   /** Removes the CompilationUnit corresponding to the given SourceFile
    *  from consideration for recompilation.
    */
-  def removeUnitOf(s: SourceFile): Option[RichCompilationUnit] = { toBeRemoved += s.file; unitOfFile get s.file }
+  def removeUnitOf(s: SourceFile): Option[RichCompilationUnit] = { toBeRemoved.synchronized { toBeRemoved += s.file }; unitOfFile get s.file }
 
   /** Returns the top level classes and objects that were deleted
    * in the editor since last time recentlyDeleted() was called.
@@ -77,7 +85,7 @@ trait CompilerControl { self: Global =>
   }
 
   /** Locate smallest tree that encloses position
-   *  @pre Position must be loaded
+   *  @note Pre-condition: Position must be loaded
    */
   def locateTree(pos: Position): Tree = onUnitOf(pos.source) { unit => new Locator(pos) locateIn unit.body }
 
@@ -123,10 +131,10 @@ trait CompilerControl { self: Global =>
     postWorkItem(new AskTypeAtItem(pos, response))
 
   /** Sets sync var `response` to the fully attributed & typechecked tree contained in `source`.
-   *  @pre `source` needs to be loaded.
+   *  @note Pre-condition: `source` needs to be loaded.
    *  @note Deprecated because of race conditions in the typechecker when the background compiler
    *        is interrupted while typing the same `source`.
-   *  @see  SI-6578
+   *  @see  scala/bug#6578
    */
   @deprecated("Use `askLoadedTyped` instead to avoid race conditions in the typechecker", "2.10.1")
   def askType(source: SourceFile, forceReload: Boolean, response: Response[Tree]) =
@@ -167,14 +175,14 @@ trait CompilerControl { self: Global =>
 
   /** Sets sync var `response` to list of members that are visible
    *  as members of the tree enclosing `pos`, possibly reachable by an implicit.
-   *  @pre  source is loaded
+   *  @note Pre-condition: source is loaded
    */
   def askTypeCompletion(pos: Position, response: Response[List[Member]]) =
     postWorkItem(new AskTypeCompletionItem(pos, response))
 
   /** Sets sync var `response` to list of members that are visible
    *  as members of the scope enclosing `pos`.
-   *  @pre  source is loaded
+   *  @note  Pre-condition: source is loaded
    */
   def askScopeCompletion(pos: Position, response: Response[List[Member]]) =
     postWorkItem(new AskScopeCompletionItem(pos, response))
@@ -273,7 +281,7 @@ trait CompilerControl { self: Global =>
     val tpe: Type
     val accessible: Boolean
     def implicitlyAdded = false
-    def symNameDropLocal: Name = sym.name.dropLocal
+    def symNameDropLocal: Name = if (sym.name.isTermName) sym.name.dropLocal else sym.name
 
     private def accessible_s = if (accessible) "" else "[inaccessible] "
     def forceInfoString = {

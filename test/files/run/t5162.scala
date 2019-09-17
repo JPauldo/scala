@@ -1,4 +1,4 @@
-// In run, rather than pos, to check for problems like SI-4283
+// In run, rather than pos, to check for problems like scala/bug#4283
 object O1 {
   private[O1] class Base {
     def foo: Int = 0
@@ -13,7 +13,7 @@ object O2 {
 }
 
 object Test {
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
     new O2.Derived().foo
   }
 }

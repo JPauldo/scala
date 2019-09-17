@@ -1,23 +1,23 @@
-/*                     __                                               *\
-**     ________ ___   / /  ___     Scala API                            **
-**    / __/ __// _ | / /  / _ |    (c) 2003-2013, LAMP/EPFL             **
-**  __\ \/ /__/ __ |/ /__/ __ |    http://scala-lang.org/               **
-** /____/\___/_/ |_/____/_/ | |                                         **
-**                          |/                                          **
-\*                                                                      */
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
 
 package scala
 
 import scala.collection.immutable
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 
 /** The package object `scala.sys` contains methods for reading
  *  and altering core aspects of the virtual machine as well as the
  *  world outside of it.
- *
- *  @author Paul Phillips
- *  @version 2.9
- *  @since   2.9
  */
 package object sys {
   /** Throw a new RuntimeException with the supplied message.
@@ -54,11 +54,14 @@ package object sys {
    */
   def props: SystemProperties = new SystemProperties
 
+  // TODO: consider whether layering a Map on top of Java's properties is really needed -- we could simply provide:
+  //  def prop(p: String) = Option(System.getProperty(p))
+
   /** An immutable Map representing the current system environment.
    *
    *  @return   a Map containing the system environment variables.
    */
-  def env: immutable.Map[String, String] = immutable.Map(System.getenv().asScala.toSeq: _*)
+  def env: immutable.Map[String, String] = immutable.Map.from(System.getenv().asScala)
 
   /** Register a shutdown hook to be run when the VM exits.
    *  The hook is automatically registered: the returned value can be ignored,
@@ -82,6 +85,6 @@ package object sys {
     val tarray = new Array[Thread](num)
     val got    = Thread.enumerate(tarray)
 
-    tarray take got
+    immutable.ArraySeq.unsafeWrapArray(tarray).take(got)
   }
 }

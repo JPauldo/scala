@@ -1,13 +1,20 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
 package typechecker
 
 import Checkability._
-import scala.language.postfixOps
+import scala.collection.mutable.ListBuffer
 
 /** On pattern matcher checkability:
  *
@@ -47,7 +54,7 @@ import scala.language.postfixOps
  *  We evaluate "X with conform to P" by checking `X <: P_wild`, where
  *  P_wild is the result of substituting wildcard types in place of
  *  pattern type variables. This is intentionally stricter than
- *  (X matchesPattern P), see SI-8597 for motivating test cases.
+ *  (X matchesPattern P), see scala/bug#8597 for motivating test cases.
  *
  *  Examples of how this info is put to use:
  *  sealed trait A[T] ; class B[T] extends A[T]
@@ -77,16 +84,16 @@ trait Checkable {
   def propagateKnownTypes(from: Type, to: Symbol): Type = {
     def tparams  = to.typeParams
     val tvars    = tparams map (p => TypeVar(p))
-    val tvarType = appliedType(to, tvars: _*)
-    val bases    = from.baseClasses filter (to.baseClasses contains _)
+    val tvarType = appliedType(to, tvars)
 
-    bases foreach { bc =>
+    from.baseClasses foreach { bc => if (to.baseClasses.contains(bc)){
       val tps1 = (from baseType bc).typeArgs
       val tps2 = (tvarType baseType bc).typeArgs
-      if (tps1.size != tps2.size)
-        devWarning(s"Unequally sized type arg lists in propagateKnownTypes($from, $to): ($tps1, $tps2)")
+      devWarningIf(!sameLength(tps1, tps2)) {
+        s"Unequally sized type arg lists in propagateKnownTypes($from, $to): ($tps1, $tps2)"
+      }
 
-      (tps1, tps2).zipped foreach (_ =:= _)
+      foreach2(tps1, tps2)(_ =:= _)
       // Alternate, variance respecting formulation causes
       // neg/unchecked3.scala to fail (abstract types).  TODO -
       // figure it out. It seems there is more work to do if I
@@ -98,13 +105,13 @@ trait Checkable {
       //   else if (tparam.isContravariant) tp2 <:< tp1
       //   else tp1 =:= tp2
       // )
-    }
+    }}
 
-    val resArgs = tparams zip tvars map {
+    val resArgs = map2(tparams, tvars){
       case (_, tvar) if tvar.instValid => tvar.constr.inst
       case (tparam, _)                 => tparam.tpeHK
     }
-    appliedType(to, resArgs: _*)
+    appliedType(to, resArgs)
   }
 
   private def isUnwarnableTypeArgSymbol(sym: Symbol) = (
@@ -119,14 +126,23 @@ trait Checkable {
   private def uncheckedOk(tp: Type) = tp hasAnnotation UncheckedClass
 
   private def typeArgsInTopLevelType(tp: Type): List[Type] = {
-    val tps = tp match {
-      case RefinedType(parents, _)              => parents flatMap typeArgsInTopLevelType
-      case TypeRef(_, ArrayClass, arg :: Nil)   => if (arg.typeSymbol.isAbstractType) arg :: Nil else typeArgsInTopLevelType(arg)
-      case TypeRef(pre, sym, args)              => typeArgsInTopLevelType(pre) ++ args
-      case ExistentialType(tparams, underlying) => tparams.map(_.tpe) ++ typeArgsInTopLevelType(underlying)
-      case _                                    => Nil
+    val res: ListBuffer[Type] = ListBuffer.empty[Type]
+    def add(t: Type) = if (!isUnwarnableTypeArg(t)) res += t
+    def loop(tp: Type): Unit = tp match {
+      case RefinedType(parents, _) =>
+        parents foreach loop
+      case TypeRef(_, ArrayClass, arg :: Nil) =>
+        if (arg.typeSymbol.isAbstractType) add(arg) else loop(arg)
+      case TypeRef(pre, sym, args) =>
+        loop(pre)
+        args.foreach(add)
+      case ExistentialType(tparams, underlying) =>
+        tparams.foreach(tp => add(tp.tpe))
+        loop(underlying)
+      case _ => ()
     }
-    tps filterNot isUnwarnableTypeArg
+    loop(tp)
+    res.toList
   }
 
   private def scrutConformsToPatternType(scrut: Type, pattTp: Type): Boolean = {
@@ -211,13 +227,12 @@ trait Checkable {
       && !(sym2 isSubClass sym1)
     )
     /** Are all children of these symbols pairwise irreconcilable? */
-    def allChildrenAreIrreconcilable(sym1: Symbol, sym2: Symbol) = (
-      sym1.sealedChildren.toList forall (c1 =>
-        sym2.sealedChildren.toList forall (c2 =>
-          areIrreconcilableAsParents(c1, c2)
-        )
-      )
-    )
+    def allChildrenAreIrreconcilable(sym1: Symbol, sym2: Symbol) = {
+      val sc1 = sym1.sealedChildren
+      val sc2 = sym2.sealedChildren
+      sc1.forall(c1 => sc2.forall(c2 => areIrreconcilableAsParents(c1, c2)))
+    }
+
     /** Is it impossible for the given symbols to be parents in the same class?
      *  This means given A and B, can there be an instance of A with B? This is the
      *  case if neither A nor B is a subclass of the other, and one of the following
@@ -247,13 +262,14 @@ trait Checkable {
     def isNeverSubClass(sym1: Symbol, sym2: Symbol) = areIrreconcilableAsParents(sym1, sym2)
 
     private def isNeverSubArgs(tps1: List[Type], tps2: List[Type], tparams: List[Symbol]): Boolean = /*logResult(s"isNeverSubArgs($tps1, $tps2, $tparams)")*/ {
-      def isNeverSubArg(t1: Type, t2: Type, variance: Variance) = (
+      def isNeverSubArg(t1: Type, t2: Type, tparam: Symbol) = {
+        val variance = tparam.variance
         if (variance.isInvariant) isNeverSameType(t1, t2)
         else if (variance.isCovariant) isNeverSubType(t2, t1)
         else if (variance.isContravariant) isNeverSubType(t1, t2)
         else false
-      )
-      exists3(tps1, tps2, tparams map (_.variance))(isNeverSubArg)
+      }
+      exists3(tps1, tps2, tparams)(isNeverSubArg)
     }
     private def isNeverSameType(tp1: Type, tp2: Type): Boolean = (tp1, tp2) match {
       case (TypeRef(_, sym1, args1), TypeRef(_, sym2, args2)) =>
@@ -284,52 +300,58 @@ trait Checkable {
         case TypeRef(_, NothingClass | NullClass | AnyValClass, _) => false
         case RefinedType(_, decls) if !decls.isEmpty               => false
         case RefinedType(parents, _)                               => parents forall isCheckable
-        case p                                                     => new CheckabilityChecker(AnyTpe, p) isCheckable
+        case p                                                     => new CheckabilityChecker(AnyTpe, p).isCheckable
       })
     )
 
     /** TODO: much better error positions.
-     *  Kind of stuck right now because they just pass us the one tree.
-     *  TODO: Eliminate inPattern, canRemedy, which have no place here.
-     */
-    def checkCheckable(tree: Tree, P0: Type, X0: Type, inPattern: Boolean, canRemedy: Boolean = false) {
+      * Kind of stuck right now because they just pass us the one tree.
+      * TODO: Eliminate inPattern, canRemedy, which have no place here.
+      *
+      *  Instead of the canRemedy flag, annotate uncheckable types that have become checkable because of the availability of a class tag?
+      */
+    def checkCheckable(tree: Tree, P0: Type, X0: Type, inPattern: Boolean, canRemedy: Boolean = false): Unit = {
       if (uncheckedOk(P0)) return
       def where = if (inPattern) "pattern " else ""
 
-      // singleton types not considered here, dealias the pattern for SI-XXXX
-      val P = P0.dealiasWiden
-      val X = X0.widen
+      if(P0.typeSymbol == SingletonClass)
+        reporter.warning(tree.pos, s"fruitless type test: every non-null value will be a Singleton dynamically")
+      else {
+        // singleton types not considered here, dealias the pattern for SI-XXXX
+        val P = P0.dealiasWiden
+        val X = X0.widen
 
-      def PString = if (P eq P0) P.toString else s"$P (the underlying of $P0)"
+        def PString = if (P eq P0) P.toString else s"$P (the underlying of $P0)"
 
-      P match {
-        // Prohibit top-level type tests for these, but they are ok nested (e.g. case Foldable[Nothing] => ... )
-        case TypeRef(_, NothingClass | NullClass | AnyValClass, _) =>
-          InferErrorGen.TypePatternOrIsInstanceTestError(tree, P)
-        // If top-level abstract types can be checked using a classtag extractor, don't warn about them
-        case TypeRef(_, sym, _) if sym.isAbstractType && canRemedy =>
-          ;
-        // Matching on types like case _: AnyRef { def bippy: Int } => doesn't work -- yet.
-        case RefinedType(_, decls) if !decls.isEmpty =>
-          reporter.warning(tree.pos, s"a pattern match on a refinement type is unchecked")
-        case RefinedType(parents, _) =>
-          parents foreach (p => checkCheckable(tree, p, X, inPattern, canRemedy))
-        case _ =>
-          val checker = new CheckabilityChecker(X, P)
-          if (checker.result == RuntimeCheckable)
-            log(checker.summaryString)
+        P match {
+          // Prohibit top-level type tests for these, but they are ok nested (e.g. case Foldable[Nothing] => ... )
+          case TypeRef(_, NothingClass | NullClass | AnyValClass, _) =>
+            InferErrorGen.TypePatternOrIsInstanceTestError(tree, P)
+          // If top-level abstract types can be checked using a classtag extractor, don't warn about them
+          case TypeRef(_, sym, _) if sym.isAbstractType && canRemedy =>
+            ;
+          // Matching on types like case _: AnyRef { def bippy: Int } => doesn't work -- yet.
+          case RefinedType(_, decls) if !decls.isEmpty =>
+            reporter.warning(tree.pos, s"a pattern match on a refinement type is unchecked")
+          case RefinedType(parents, _) =>
+            parents foreach (p => checkCheckable(tree, p, X, inPattern, canRemedy))
+          case _ =>
+            val checker = new CheckabilityChecker(X, P)
+            if (checker.result == RuntimeCheckable)
+              log(checker.summaryString)
 
-          if (checker.neverMatches) {
-            val addendum = if (checker.neverSubClass) "" else " (but still might match its erasure)"
-            reporter.warning(tree.pos, s"fruitless type test: a value of type $X cannot also be a $PString$addendum")
-          }
-          else if (checker.isUncheckable) {
-            val msg = (
-              if (checker.uncheckableType =:= P) s"abstract type $where$PString"
-              else s"${checker.uncheckableMessage} in type $where$PString"
-            )
-            reporter.warning(tree.pos, s"$msg is unchecked since it is eliminated by erasure")
-          }
+            if (checker.neverMatches) {
+              val addendum = if (checker.neverSubClass) "" else " (but still might match its erasure)"
+              reporter.warning(tree.pos, s"fruitless type test: a value of type $X cannot also be a $PString$addendum")
+            }
+            else if (checker.isUncheckable) {
+              val msg = (
+                if (checker.uncheckableType =:= P) s"abstract type $where$PString"
+                else s"${checker.uncheckableMessage} in type $where$PString"
+              )
+              reporter.warning(tree.pos, s"$msg is unchecked since it is eliminated by erasure")
+            }
+        }
       }
     }
   }

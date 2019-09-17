@@ -1,18 +1,26 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
-package scala.tools.nsc
-package interpreter
+package scala.tools.nsc.interpreter
 
-import scala.language.implicitConversions
+import java.io.InputStream
+import java.net.URL
 
 import scala.collection.mutable
 import scala.io.Codec
-import java.net.URL
-import scala.reflect.runtime.{universe => ru}
+import scala.language.implicitConversions
 import scala.reflect.ClassTag
+import scala.reflect.runtime.{universe => ru}
+import scala.tools.nsc.io
 
 /** Collecting some power mode examples.
 
@@ -42,9 +50,7 @@ Lost after 18/flatten {
 /** A class for methods to be injected into the intp in power mode.
  */
 class Power[ReplValsImpl <: ReplVals : ru.TypeTag: ClassTag](val intp: IMain, replVals: ReplValsImpl) {
-  import intp.{ beQuietDuring, parse }
   import intp.global._
-  import definitions.{ compilerTypeFromTag, compilerSymbolFromTag}
 
   abstract class SymSlurper {
     def isKeep(sym: Symbol): Boolean
@@ -106,17 +112,12 @@ class Power[ReplValsImpl <: ReplVals : ru.TypeTag: ClassTag](val intp: IMain, re
       if (packageClass.isPackageClass)
         apply(packageClass)
       else {
-        repldbg("Not a package class! " + packageClass)
+//        repldbg("Not a package class! " + packageClass)
         Set()
       }
     }
   }
 
-  private def customBanner = replProps.powerBanner.option flatMap {
-    case f if f.getName == "classic" => Some(classic)
-    case f => io.File(f).safeSlurp()
-  }
-  private def customInit   = replProps.powerInitCode.option flatMap (f => io.File(f).safeSlurp())
 
   def classic = """
     |** Power User mode enabled - BEEP WHIR GYVE **
@@ -126,32 +127,28 @@ class Power[ReplValsImpl <: ReplVals : ru.TypeTag: ClassTag](val intp: IMain, re
     |** Try  :help, :vals, power.<tab>           **
   """.stripMargin.trim
 
-  def banner = customBanner getOrElse """
+  def banner = """
     |Power mode enabled. :phase is at typer.
     |import scala.tools.nsc._, intp.global._, definitions._
     |Try :help or completions for vals._ and power._
   """.stripMargin.trim
 
-  private def initImports =
-  """scala.tools.nsc._
-    |scala.collection.JavaConverters._
-    |intp.global.{ error => _, _ }
-    |definitions.{ getClass => _, _ }
-    |power.rutil._
-    |replImplicits._
-    |treedsl.CODE._""".stripMargin.lines
-
-  def init = customInit getOrElse initImports.mkString("import ", ", ", "")
+  val initImports = List(
+    "import scala.tools.nsc._",
+    "import scala.collection.JavaConverters._",
+    "import intp.global.{ error => _, _ }",
+    "import definitions.{ getClass => _, _ }",
+    "import power.rutil._",
+    "import replImplicits._",
+    "import treedsl.CODE._")
 
   /** Quietly starts up power mode and runs whatever is in init.
    */
-  def unleash(): Unit = beQuietDuring {
+  def unleash(): Unit = intp.reporter.withoutPrintingResults {
     // First we create the ReplVals instance and bind it to $r
     intp.bind("$r", replVals)
     // Then we import everything from $r.
     intp interpret s"import ${ intp.originalPath("$r") }._"
-    // And whatever else there is to do.
-    init.lines foreach (intp interpret _)
   }
 
   trait LowPriorityInternalInfo {
@@ -183,14 +180,14 @@ class Power[ReplValsImpl <: ReplVals : ru.TypeTag: ClassTag](val intp: IMain, re
       || s.isAnonOrRefinementClass
       || s.isAnonymousFunction
     )
-    def symbol            = compilerSymbolFromTag(tag)
-    def tpe               = compilerTypeFromTag(tag)
+    def symbol            = definitions.compilerSymbolFromTag(tag)
+    def tpe               = definitions.compilerTypeFromTag(tag)
     def members           = membersUnabridged filterNot excludeMember
     def membersUnabridged = tpe.members.toList
     def pkg               = symbol.enclosingPackage
     def tag               = typeEvidence
     def runtimeClass      = runtimeClassEvidence.runtimeClass
-    def shortClass        = runtimeClass.getName split "[$.]" last
+    def shortClass        = runtimeClass.getName.split("[$.]").last
     def baseClasses       = tpe.baseClasses
 
     override def toString = value match {
@@ -201,12 +198,12 @@ class Power[ReplValsImpl <: ReplVals : ru.TypeTag: ClassTag](val intp: IMain, re
 
   trait LowPriorityPrettifier {
     implicit object AnyPrettifier extends Prettifier[Any] {
-      def show(x: Any): Unit = prettify(x) foreach println
-      def prettify(x: Any): TraversableOnce[String] = x match {
+      def show(x: Any): Unit = prettify(x).iterator foreach println
+      def prettify(x: Any): IterableOnce[String] = x match {
         case x: Name                => List(x.decode)
-        case Tuple2(k, v)           => List(prettify(k).toIterator ++ Iterator("->") ++ prettify(v) mkString " ")
+        case Tuple2(k, v)           => List(prettify(k).iterator ++ Iterator("->") ++ prettify(v) mkString " ")
         case xs: Array[_]           => xs.iterator flatMap prettify
-        case xs: TraversableOnce[_] => xs flatMap prettify
+        case xs: IterableOnce[_]    => xs.iterator flatMap prettify
         case x                      => List(Prettifier.stringOf(x))
       }
     }
@@ -218,15 +215,15 @@ class Power[ReplValsImpl <: ReplVals : ru.TypeTag: ClassTag](val intp: IMain, re
   object Prettifier extends LowPriorityPrettifier {
     def stringOf(x: Any): String = scala.runtime.ScalaRunTime.stringOf(x)
     def default[T] = new Prettifier[T] {
-      def prettify(x: T): TraversableOnce[String] = AnyPrettifier prettify x
+      def prettify(x: T): IterableOnce[String] = AnyPrettifier prettify x
       def show(x: T): Unit = AnyPrettifier show x
     }
   }
   trait Prettifier[T] {
     def show(x: T): Unit
-    def prettify(x: T): TraversableOnce[String]
+    def prettify(x: T): IterableOnce[String]
 
-    def prettify(xs: TraversableOnce[T]): TraversableOnce[String] = xs flatMap (x => prettify(x))
+    def prettify(xs: IterableOnce[T]): IterableOnce[String] = xs.iterator flatMap (x => prettify(x))
   }
 
   abstract class PrettifierClass[T: Prettifier]() {
@@ -234,9 +231,9 @@ class Power[ReplValsImpl <: ReplVals : ru.TypeTag: ClassTag](val intp: IMain, re
     def value: Seq[T]
 
     def pp(f: Seq[T] => Seq[T]): Unit =
-      pretty prettify f(value) foreach (StringPrettifier show _)
+      pretty.prettify(f(value)).iterator foreach (StringPrettifier show _)
 
-    def freq[U](p: T => U) = (value.toSeq groupBy p mapValues (_.size)).toList sortBy (-_._2) map (_.swap)
+    def freq[U](p: T => U) = value.groupMapReduce(p)(_ => 1)(_ + _).toList sortBy (-_._2) map (_.swap)
 
     def >>(implicit ord: Ordering[T]): Unit      = pp(_.sorted)
     def >!(): Unit                               = pp(_.distinct)
@@ -252,7 +249,7 @@ class Power[ReplValsImpl <: ReplVals : ru.TypeTag: ClassTag](val intp: IMain, re
     // make an url out of the string
     def u: URL = (
       if (s contains ":") new URL(s)
-      else if (new JFile(s) exists) new JFile(s).toURI.toURL
+      else if (new java.io.File(s).exists) new java.io.File(s).toURI.toURL
       else new URL("http://" + s)
     )
   }
@@ -286,8 +283,8 @@ class Power[ReplValsImpl <: ReplVals : ru.TypeTag: ClassTag](val intp: IMain, re
 
     implicit def replInternalInfo[T: ru.TypeTag : ClassTag](x: T): InternalInfoWrapper[T] = new InternalInfoWrapper[T](Some(x))
     implicit def replEnhancedStrings(s: String): RichReplString = new RichReplString(s)
-    implicit def replMultiPrinting[T: Prettifier](xs: TraversableOnce[T]): MultiPrettifierClass[T] =
-      new MultiPrettifierClass[T](xs.toSeq)
+    implicit def replMultiPrinting[T: Prettifier](xs: IterableOnce[T]): MultiPrettifierClass[T] =
+      new MultiPrettifierClass[T](Seq.from(xs))
     implicit def replPrettifier[T] : Prettifier[T] = Prettifier.default[T]
     implicit def replTypeApplication(sym: Symbol): RichSymbol = new RichSymbol(sym)
 
@@ -318,7 +315,7 @@ class Power[ReplValsImpl <: ReplVals : ru.TypeTag: ClassTag](val intp: IMain, re
   lazy val phased: Phased       = new { val global: intp.global.type = intp.global } with Phased { }
 
   def unit(code: String)    = newCompilationUnit(code)
-  def trees(code: String)   = parse(code) match { case parse.Success(trees) => trees; case _ => Nil }
+  def trees(code: String)   = intp.parse(code).map(_._1).getOrElse(Nil)
 
   override def toString = s"""
     |** Power mode status **

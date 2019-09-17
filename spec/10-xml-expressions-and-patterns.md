@@ -30,8 +30,7 @@ related to entity resolution.
 The following productions describe Scala's extensible markup language,
 designed as close as possible to the W3C extensible markup language
 standard. Only the productions for attribute values and character data are changed.
-Scala does not support declarations, CDATA sections or processing instructions.
-Entity references are not resolved at runtime.
+Scala does not support declarations. Entity references are not resolved at runtime.
 
 ```ebnf
 Element       ::=    EmptyElemTag
@@ -80,7 +79,7 @@ CharData      ::=   { CharNoRef } $\textit{ without}$ {CharNoRef}‘{’CharB {C
                                   $\textit{ and without}$ {CharNoRef}‘]]>’{CharNoRef}
 ```
 
-<!-- {% raw  %} stupid liquid borks on the double brace below; brace yourself, liquid! -->
+<!-- {% raw  %} sigh: liquid borks on the double brace below; brace yourself, liquid! -->
 XML expressions may contain Scala expressions as attribute values or
 within nodes. In the latter case, these are embedded using a single opening
 brace `{` and ended by a closing brace `}`. To express a single opening braces
@@ -89,7 +88,7 @@ Thus, `{{` represents the XML text `{` and does not introduce an embedded Scala 
 <!-- {% endraw %} -->
 
 ```ebnf
-BaseChar, Char, Comment, CombiningChar, Ideographic, NameChar, S, Reference
+BaseChar, CDSect, Char, Comment, CombiningChar, Ideographic, NameChar, PI, S, Reference
               ::=  $\textit{“as in W3C XML”}$
 
 Char1         ::=  Char $\textit{ without}$ ‘<’ | ‘&’

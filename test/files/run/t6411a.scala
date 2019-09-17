@@ -1,3 +1,9 @@
+// filter: scala.runtime.BoxesRunTime.{1,2}unboxToInt
+//
+// noise from -XX:CompileCommand=exclude,scala/runtime/BoxesRunTime.unboxToInt
+// CompilerOracle: exclude scala/runtime/BoxesRunTime.unboxToInt
+// ### Excluding compile: static scala.runtime.BoxesRunTime::unboxToInt
+//
 import scala.reflect.runtime.universe._
 import scala.reflect.runtime.{currentMirror => cm}
 import scala.language.reflectiveCalls
@@ -30,6 +36,9 @@ object a {
 }
 
 object Test extends App {
+  // strip module name
+  def filtered(s: Any) = s.toString.replaceAllLiterally("java.base/", "")
+
   def test(methName: String, arg: Any) = {
     val moduleA = cm.reflect(a)
     val msym = moduleA.symbol.info.decl(TermName(methName)).asMethod
@@ -44,7 +53,7 @@ object Test extends App {
       }
     println(s"as seen by Scala reflection: ${msym.asInstanceOf[scala.reflect.internal.Symbols#Symbol].defString}")
     println(s"as seen by Java reflection: ${mmirror.asInstanceOf[{val jmeth: java.lang.reflect.Method}].jmeth}")
-    println(s"result = $mresult")
+    println(s"result = ${filtered(mresult)}")
   }
 
   test("yg_1", new Y(1))
@@ -57,7 +66,7 @@ object Test extends App {
   test("ya_4", Array(new Y("4")))
   test("yl_5", List(new Y(5)))
   test("yl_5", List(new Y("5")))
-  // FIXME: disabled because of SI-7056
+  // FIXME: disabled because of scala/bug#7056
   // test("yv_6", new Y(6))
   // test("yv_6", new Y("6"))
   test("yni_7", new Y(7))
@@ -73,7 +82,7 @@ object Test extends App {
   test("za_4", Array(new Z("4")))
   test("zl_5", List(new Z(5)))
   test("zl_5", List(new Z("5")))
-  // FIXME: disabled because of SI-7056
+  // FIXME: disabled because of scala/bug#7056
   // test("zv_6", new Z(6))
   // test("zv_6", new Z("6"))
   test("zni_7", new Z(7))

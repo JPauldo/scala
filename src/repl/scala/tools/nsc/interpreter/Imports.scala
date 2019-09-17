@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -11,8 +18,9 @@ import scala.collection.mutable
 trait Imports {
   self: IMain =>
 
-  import global._
-  import definitions.{ ScalaPackage, JavaLangPackage, PredefModule }
+  import global.{Type, Tree, Import, ImportSelector, Select, Ident, newTermName, Symbol, TermSymbol, NoType, Name, enteringPickler}
+  import global.nme.{ INTERPRETER_IMPORT_WRAPPER => iw }
+  import global.definitions.{ ScalaPackage, JavaLangPackage, PredefModule }
   import memberHandlers._
 
   /** Synthetic import handlers for the language defined imports. */
@@ -43,9 +51,7 @@ trait Imports {
    *  scope twiddling which should be swept away in favor of digging
    *  into the compiler scopes.
    */
-  def sessionWildcards: List[Type] = {
-    importHandlers filter (_.importsWildcard) map (_.targetType) distinct
-  }
+  def sessionWildcards: List[Type] = importHandlers.filter(_.importsWildcard).map(_.targetType).distinct
 
   def languageSymbols        = languageWildcardSyms flatMap membersAtPickler
   def sessionImportedSymbols = importHandlers flatMap (_.importedSymbols)
@@ -96,7 +102,7 @@ trait Imports {
    */
   case class ComputedImports(header: String, prepend: String, append: String, access: String)
 
-  protected def importsCode(wanted: Set[Name], wrapper: Request#Wrapper, definesClass: Boolean, generousImports: Boolean): ComputedImports = {
+  protected def importsCode(wanted: Set[Name], request: Request, definesClass: Boolean, generousImports: Boolean): ComputedImports = {
     val header, code, trailingBraces, accessPath = new StringBuilder
     val currentImps = mutable.HashSet[Name]()
     var predefEscapes = false      // only emit predef import header if name not resolved in history, loosely
@@ -131,20 +137,19 @@ trait Imports {
               case ReqAndHandler(_, _: ImportHandler) => referencedNames            // for "import a.b", add "a" to names to be resolved
               case _ => Nil
             }
-            val newWanted = wanted ++ augment -- definedNames -- importedNames
+            val newWanted = wanted ++ augment diff definedNames.toSet diff importedNames.toSet
             rh :: select(rest, newWanted)
         }
       }
 
       /** Flatten the handlers out and pair each with the original request */
-      select(allReqAndHandlers reverseMap { case (r, h) => ReqAndHandler(r, h) }, wanted).reverse
+      select(allReqAndHandlers.reverseIterator.map { case (r, h) => ReqAndHandler(r, h) }.toList, wanted).reverse
     }
 
     // add code for a new object to hold some imports
-    def addWrapper() {
-      import nme.{ INTERPRETER_IMPORT_WRAPPER => iw }
-      code append (wrapper.prewrap format iw)
-      trailingBraces append wrapper.postwrap
+    def addWrapper(): Unit = {
+      code append (request.wrapperDef(iw) + " {\n")
+      trailingBraces append "}\n"+ request.postwrap +"\n"
       accessPath append s".$iw"
       currentImps.clear()
     }
@@ -165,8 +170,7 @@ trait Imports {
       val tempValLines = mutable.Set[Int]()
       for (ReqAndHandler(req, handler) <- reqsToUse) {
         val objName = req.lineRep.readPathInstance
-        if (isReplTrace)
-          code.append(ss"// $objName definedNames ${handler.definedNames}, curImps $currentImps\n")
+//        if (isReplTrace) code.append(ss"// $objName definedNames ${handler.definedNames}, curImps $currentImps\n")
         handler match {
           case h: ImportHandler if checkHeader(h) =>
             header.clear()

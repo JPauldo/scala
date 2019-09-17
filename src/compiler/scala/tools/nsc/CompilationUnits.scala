@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -14,18 +21,28 @@ trait CompilationUnits { global: Global =>
   /** An object representing a missing compilation unit.
    */
   object NoCompilationUnit extends CompilationUnit(NoSourceFile) {
-    override lazy val isJava = false
+    override val isJava = false
     override def exists = false
     override def toString() = "NoCompilationUnit"
+  }
+
+  /** Creates a `FreshNameCreator` that reports an error if it is used during the typer phase */
+  final def warningFreshNameCreator: FreshNameCreator = new FreshNameCreator {
+    override def newName(prefix: String): String = {
+      if (global.phase == currentRun.typerPhase) {
+        devWarningDumpStack("Typer phase should not use the compilation unit scoped fresh name creator", 32)
+      }
+      super.newName(prefix)
+    }
   }
 
   /** One unit of compilation that has been submitted to the compiler.
     * It typically corresponds to a single file of source code.  It includes
     * error-reporting hooks.  */
-  class CompilationUnit(val source: SourceFile) extends CompilationUnitContextApi { self =>
-
+  class CompilationUnit(val source: SourceFile, freshNameCreator: FreshNameCreator) extends CompilationUnitContextApi { self =>
+    def this(source: SourceFile) = this(source, new FreshNameCreator)
     /** the fresh name creator */
-    implicit val fresh: FreshNameCreator                           = new FreshNameCreator
+    implicit val fresh: FreshNameCreator = freshNameCreator
     def freshTermName(prefix: String = nme.FRESH_TERM_NAME_PREFIX) = global.freshTermName(prefix)
     def freshTypeName(prefix: String)                              = global.freshTypeName(prefix)
 
@@ -52,40 +69,45 @@ trait CompilationUnits { global: Global =>
      *  To get their sourcefiles, you need to dereference with .sourcefile
      */
     private[this] val _depends = mutable.HashSet[Symbol]()
-    // sbt compatibility (SI-6875)
-    //
-    // imagine we have a file named A.scala, which defines a trait named Foo and a module named Main
-    // Main contains a call to a macro, which calls compileLate to define a mock for Foo
-    // compileLate creates a virtual file Virt35af32.scala, which contains a class named FooMock extending Foo,
-    // and macro expansion instantiates FooMock. the stage is now set. let's see what happens next.
-    //
-    // without this workaround in scalac or without being patched itself, sbt will think that
-    // * Virt35af32 depends on A (because it extends Foo from A)
-    // * A depends on Virt35af32 (because it contains a macro expansion referring to FooMock from Virt35af32)
-    //
-    // after compiling A.scala, sbt will notice that it has a new source file named Virt35af32.
-    // it will also think that this file hasn't yet been compiled and since A depends on it
-    // it will think that A needs to be recompiled.
-    //
-    // recompilation will lead to another macro expansion. that another macro expansion might choose to create a fresh mock,
-    // producing another virtual file, say, Virtee509a, which will again trick sbt into thinking that A needs a recompile,
-    // which will lead to another macro expansion, which will produce another virtual file and so on
-    def depends = if (exists && !source.file.isVirtual) _depends else mutable.HashSet[Symbol]()
+    @deprecated("Not supported and no longer used by Zinc", "2.12.9")
+    def depends = _depends
+    def registerDependency(symbol: Symbol): Unit = {
+      // sbt compatibility (scala/bug#6875)
+      //
+      // imagine we have a file named A.scala, which defines a trait named Foo and a module named Main
+      // Main contains a call to a macro, which calls compileLate to define a mock for Foo
+      // compileLate creates a virtual file Virt35af32.scala, which contains a class named FooMock extending Foo,
+      // and macro expansion instantiates FooMock. the stage is now set. let's see what happens next.
+      //
+      // without this workaround in scalac or without being patched itself, sbt will think that
+      // * Virt35af32 depends on A (because it extends Foo from A)
+      // * A depends on Virt35af32 (because it contains a macro expansion referring to FooMock from Virt35af32)
+      //
+      // after compiling A.scala, sbt will notice that it has a new source file named Virt35af32.
+      // it will also think that this file hasn't yet been compiled and since A depends on it
+      // it will think that A needs to be recompiled.
+      //
+      // recompilation will lead to another macro expansion. that another macro expansion might choose to create a fresh mock,
+      // producing another virtual file, say, Virtee509a, which will again trick sbt into thinking that A needs a recompile,
+      // which will lead to another macro expansion, which will produce another virtual file and so on
+      if (exists && !source.file.isVirtual) _depends += symbol
+    }
 
     /** so we can relink
      */
     private[this] val _defined = mutable.HashSet[Symbol]()
+    @deprecated("Not supported", "2.12.9")
     def defined = if (exists && !source.file.isVirtual) _defined else mutable.HashSet[Symbol]()
 
     /** Synthetic definitions generated by namer, eliminated by typer.
      */
     object synthetics {
-      private val map = mutable.HashMap[Symbol, Tree]()
-      def update(sym: Symbol, tree: Tree) {
+      private val map = mutable.AnyRefMap[Symbol, Tree]()
+      def update(sym: Symbol, tree: Tree): Unit = {
         debuglog(s"adding synthetic ($sym, $tree) to $self")
         map.update(sym, tree)
       }
-      def -=(sym: Symbol) {
+      def -=(sym: Symbol): Unit = {
         debuglog(s"removing synthetic $sym from $self")
         map -= sym
       }
@@ -136,7 +158,7 @@ trait CompilationUnits { global: Global =>
     final def comment(pos: Position, msg: String): Unit = {}
 
     /** Is this about a .java source file? */
-    lazy val isJava = source.file.name.endsWith(".java")
+    val isJava = source.file.name.endsWith(".java")
 
     override def toString() = source.toString()
   }

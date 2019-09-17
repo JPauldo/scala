@@ -91,7 +91,7 @@ expands to
 ```scala
 case object Red extends Color
 case object Green extends Color
-case object Blue extends Color .
+case object Blue extends Color
 ```
 -->
 
@@ -144,7 +144,7 @@ value definition `val $p$ = $e$` is expanded as follows:
 val $\$ x$ = $e$ match {case $p$ => ($x_1 , \ldots , x_n$)}
 val $x_1$ = $\$ x$._1
 $\ldots$
-val $x_n$ = $\$ x$._n  .
+val $x_n$ = $\$ x$._n
 ```
 
 Here, $\$ x$ is a fresh name.
@@ -372,8 +372,8 @@ objects of type $S$.
 
 ###### Example
 
-The `Predef` object contains a definition which establishes `Pair`
-as an alias of the parameterized class `Tuple2`:
+Suppose we make `Pair` an alias of the parameterized class `Tuple2`,
+as follows:
 
 ```scala
 type Pair[+A, +B] = Tuple2[A, B]
@@ -669,6 +669,15 @@ def f(a: Int = 0)(b: Int = a + 1) = b // OK
 f(10)()                               // returns 11 (not 1)
 ```
 
+If an [implicit argument](07-implicits.html#implicit-parameters)
+is not found by implicit search, it may be supplied using a default argument.
+
+```scala
+implicit val i: Int = 2
+def f(implicit x: Int, s: String = "hi") = s * x
+f                                     // "hihi"
+```
+
 ### By-Name Parameters
 
 ```ebnf
@@ -684,9 +693,7 @@ function. That is, the argument is evaluated using _call-by-name_.
 
 The by-name modifier is disallowed for parameters of classes that
 carry a `val` or `var` prefix, including parameters of case
-classes for which a `val` prefix is implicitly generated. The
-by-name modifier is also disallowed for
-[implicit parameters](07-implicits.html#implicit-parameters).
+classes for which a `val` prefix is implicitly generated.
 
 ###### Example
 The declaration
@@ -864,7 +871,7 @@ An import clause has the form `import $p$.$I$` where $p$ is a
 [stable identifier](03-types.html#paths) and $I$ is an import expression.
 The import expression determines a set of names of importable members of $p$
 which are made available without qualification.  A member $m$ of $p$ is
-_importable_ if it is not [object-private](05-classes-and-objects.html#modifiers).
+_importable_ if it is [accessible](05-classes-and-objects.html#modifiers).
 The most general form of an import expression is a list of _import selectors_
 
 ```scala

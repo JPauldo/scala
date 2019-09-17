@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -14,7 +21,6 @@ package transform
  *  </p>
  *
  *  @author Martin Odersky
- *  @version 1.0
  */
 trait Transform extends SubComponent {
 
@@ -26,7 +32,7 @@ trait Transform extends SubComponent {
 
   /** The phase defined by this transform */
   class Phase(prev: scala.tools.nsc.Phase) extends StdPhase(prev) {
-    def apply(unit: global.CompilationUnit) {
+    def apply(unit: global.CompilationUnit): Unit = {
       newTransformer(unit).transformUnit(unit)
     }
   }

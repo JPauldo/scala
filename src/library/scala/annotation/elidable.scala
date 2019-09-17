@@ -1,10 +1,14 @@
-/*                     __                                               *\
-**     ________ ___   / /  ___     Scala API                            **
-**    / __/ __// _ | / /  / _ |    (c) 2002-2013, LAMP/EPFL             **
-**  __\ \/ /__/ __ |/ /__/ __ |    http://scala-lang.org/               **
-** /____/\___/_/ |_/____/_/ | |                                         **
-**                          |/                                          **
-\*                                                                      */
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
 
 package scala.annotation
 
@@ -33,32 +37,44 @@ package scala.annotation
  *  }}}
  *
  *  Complete example:
- {{{
-   import scala.annotation._, elidable._
-   object Test extends App {
-     def expensiveComputation(): Int = { Thread.sleep(1000) ; 172 }
-
-     @elidable(WARNING) def warning(msg: String) = println(msg)
-     @elidable(FINE) def debug(msg: String)      = println(msg)
-     @elidable(FINE) def computedValue           = expensiveComputation()
-
-     warning("Warning! Danger! Warning!")
-     debug("Debug! Danger! Debug!")
-     println("I computed a value: " + computedValue)
-   }
-   % scalac example.scala && scala Test
-   Warning! Danger! Warning!
-   Debug! Danger! Debug!
-   I computed a value: 172
-
-   // INFO lies between WARNING and FINE
-   % scalac -Xelide-below INFO example.scala && scala Test
-   Warning! Danger! Warning!
-   I computed a value: 0
- }}}
+ *  {{{
+ *    import scala.annotation._, elidable._
+ *    object Test extends App {
+ *      def expensiveComputation(): Int = { Thread.sleep(1000) ; 172 }
  *
- *  @author   Paul Phillips
- *  @since    2.8
+ *      @elidable(WARNING) def warning(msg: String) = println(msg)
+ *      @elidable(FINE) def debug(msg: String)      = println(msg)
+ *      @elidable(FINE) def computedValue           = expensiveComputation()
+ *
+ *      warning("Warning! Danger! Warning!")
+ *      debug("Debug! Danger! Debug!")
+ *      println("I computed a value: " + computedValue)
+ *    }
+ *    % scalac example.scala && scala Test
+ *    Warning! Danger! Warning!
+ *    Debug! Danger! Debug!
+ *    I computed a value: 172
+ *
+ *    // INFO lies between WARNING and FINE
+ *    % scalac -Xelide-below INFO example.scala && scala Test
+ *    Warning! Danger! Warning!
+ *    I computed a value: 0
+ *  }}}
+ *
+ * Note that only concrete methods can be marked `@elidable`. A non-annotated method
+ * is not elided, even if it overrides / implements a method that has the annotation.
+ *
+ * Also note that the static type determines which annotations are considered:
+ *
+ * {{{
+ *   import scala.annotation._, elidable._
+ *   class C { @elidable(0) def f(): Unit = ??? }
+ *   object O extends C { override def f(): Unit = println("O.f") }
+ *   object Test extends App {
+ *     O.f()      // not elided
+ *     (O: C).f() // elided if compiled with `-Xelide-below 1`
+ *   }
+ * }}}
  */
 final class elidable(final val level: Int) extends scala.annotation.StaticAnnotation
 
@@ -70,8 +86,6 @@ final class elidable(final val level: Int) extends scala.annotation.StaticAnnota
  *  (Select(Level, Select(FINEST, Apply(intValue, Nil))))
  *  }}}
  *  instead of the number `300`.
- *
- *  @since 2.8
  */
 object elidable {
   /** The levels `ALL` and `OFF` are confusing in this context because

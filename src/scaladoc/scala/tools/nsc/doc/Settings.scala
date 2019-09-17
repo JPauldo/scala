@@ -1,13 +1,19 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
 package doc
 
 import java.io.File
-import scala.language.postfixOps
 
 /** An extended version of compiler settings, with additional Scaladoc-specific options.
   * @param error A function that prints a string to the appropriate error stream
@@ -61,7 +67,7 @@ class Settings(error: String => Unit, val printMsg: String => Unit = println(_))
 
   lazy val uncompilableFiles = docUncompilable.value match {
     case ""     => Nil
-    case path   => io.Directory(path).deepFiles filter (_ hasExtension "scala") toList
+    case path   => io.Directory(path).deepFiles.filter(_ hasExtension "scala").toList
   }
 
   /** A setting that defines a URL to be concatenated with source locations and show a link to source files.
@@ -69,7 +75,7 @@ class Settings(error: String => Unit, val printMsg: String => Unit = println(_))
   val docsourceurl = StringSetting (
     "-doc-source-url",
     "url",
-    s"A URL pattern used to link to the source file; the following variables are available: €{TPL_NAME}, €{TPL_OWNER} and respectively €{FILE_PATH}. For example, for `scala.collection.Seq`, the variables will be expanded to `Seq`, `scala.collection` and respectively `scala/collection/Seq` (without the backquotes). To obtain a relative path for €{FILE_PATH} instead of an absolute one, use the ${sourcepath.name} setting.",
+    s"A URL pattern used to link to the source file, with some variables supported: For example, for `scala.collection.Seq` €{TPL_NAME} gives `Seq`, €{TPL_OWNER} gives `scala.collection`, €{FILE_PATH} gives `scala/collection/Seq`, €{FILE_EXT} gives `.scala`, €{FILE_PATH_EXT} gives `scala/collection/Seq.scala`, and €{FILE_LINE} gives `25` (without the backquotes). To obtain a relative path for €{FILE_PATH} and €{FILE_PATH_EXT} instead of an absolute one, use the ${sourcepath.name} setting.",
     ""
   )
 
@@ -77,11 +83,6 @@ class Settings(error: String => Unit, val printMsg: String => Unit = println(_))
     "-doc-external-doc",
     "external-doc",
     "comma-separated list of classpath_entry_path#doc_URL pairs describing external dependencies."
-  )
-
-  val useStupidTypes = BooleanSetting (
-    "-Yuse-stupid-types",
-    "Print the types of inherited members as seen from their original definition context. Hint: you don't want to do that!"
   )
 
   val docgenerator = StringSetting (
@@ -218,9 +219,21 @@ class Settings(error: String => Unit, val printMsg: String => Unit = println(_))
     "Prevents parsing and inclusion of comments from java sources."
   )
 
+  val docCanonicalBaseUrl = StringSetting (
+    "-doc-canonical-base-url",
+    "url",
+    s"A base URL to use as prefix and add `canonical` URLs to all pages. The canonical URL may be used by search engines to choose the URL that you want people to see in search results. If unset no canonical URLs are generated.",
+    ""
+  )
+
+  val visibilityPrivate = BooleanSetting (
+    "-private",
+    "Show all types and members. Unless specified, show only public and protected types and members."
+  )
+
   // For improved help output.
   def scaladocSpecific = Set[Settings#Setting](
-    docformat, doctitle, docfooter, docversion, docUncompilable, docsourceurl, docgenerator, docRootContent, useStupidTypes,
+    docformat, doctitle, docfooter, docversion, docUncompilable, docsourceurl, docgenerator, docRootContent,
     docExternalDoc,
     docAuthor, docDiagrams, docDiagramsDebug, docDiagramsDotPath,
     docDiagramsDotTimeout, docDiagramsDotRestart,
@@ -228,7 +241,7 @@ class Settings(error: String => Unit, val printMsg: String => Unit = println(_))
     docDiagramsMaxNormalClasses, docDiagramsMaxImplicitClasses,
     docNoPrefixes, docNoLinkWarnings, docRawOutput, docSkipPackages,
     docExpandAllTypes, docGroups, docNoJavaComments
-  )
+  ).map(s => s.withAbbreviation("-" + s.name))
   val isScaladocSpecific: String => Boolean = scaladocSpecific map (_.name)
 
   override def isScaladoc = true
@@ -253,18 +266,18 @@ class Settings(error: String => Unit, val printMsg: String => Unit = println(_))
     }
   }
 
-  def appendIndex(url: String): String = url.stripSuffix("index.html").stripSuffix("/") + "/index.html"
+  def stripIndex(url: String): String = url.stripSuffix("index.html").stripSuffix("/") + "/"
 
-  lazy val extUrlMapping: Map[String, String] = docExternalDoc.value flatMap { s =>
+  lazy val extUrlMapping: Map[String, String] = docExternalDoc.value.flatMap { s =>
     val idx = s.indexOf("#")
     if (idx > 0) {
       val (first, last) = s.splitAt(idx)
-      Some(new File(first).getCanonicalPath -> appendIndex(last.substring(1)))
+      Some(new File(first).getCanonicalPath -> stripIndex(last.substring(1)))
     } else {
       error(s"Illegal -doc-external-doc option; expected a pair with '#' separator, found: '$s'")
       None
     }
-  } toMap
+  }.toMap
 
   /**
    *  This is the hardcoded area of Scaladoc. This is where "undesirable" stuff gets eliminated. I know it's not pretty,
@@ -308,14 +321,6 @@ class Settings(error: String => Unit, val printMsg: String => Unit = println(_))
       "scala.runtime.AbstractFunction1",
       "scala.runtime.AbstractFunction2"
     )
-
-    /**
-     * Set of classes to exclude from index and diagrams
-     * TODO: Should be configurable
-     */
-    def isExcluded(qname: String) = {
-      excludedClassnamePatterns.exists(_.findFirstMatchIn(qname).isDefined) && !notExcludedClasses(qname)
-    }
 
     /** Common conversion targets that affect any class in Scala */
     val commonConversionTargets = Set(

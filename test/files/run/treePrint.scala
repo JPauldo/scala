@@ -1,3 +1,5 @@
+import scala.tools.nsc.interpreter.shell.ReplReporterImpl
+
 /** Testing compact tree printers.
  */
 object Test {
@@ -27,14 +29,14 @@ object Test {
     }
   """
 
-  class NullOutputStream extends OutputStream { def write(b: Int) { } }
+  class NullOutputStream extends OutputStream { def write(b: Int): Unit = { } }
 
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
     val settings = new Settings
     settings.classpath.value = System.getProperty("java.class.path")
     settings.Ycompacttrees.value = true
 
-    val intp = new IMain(settings, new PrintWriter(new NullOutputStream))
+    val intp = new IMain(settings, new ReplReporterImpl(settings, new PrintWriter(new NullOutputStream)))
     val vals = new ReplVals { }
     val power = new Power(intp, vals)
     intp.interpret("""def initialize = "Have to interpret something or we get errors." """)

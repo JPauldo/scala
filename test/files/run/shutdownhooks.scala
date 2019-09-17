@@ -1,12 +1,14 @@
 object Test {
   scala.sys.addShutdownHook {
-    Thread.sleep(1000)
+    // sleep is added here so main#shutdown happens before this hook.
+    // Thread.sleep(1000) was not enough acoording to https://github.com/scala/bug/issues/11536
+    Thread.sleep(3000)
     println("Test#shutdown.")
   }
 
   def daemon() = {
     val t = new Thread {
-      override def run() {
+      override def run(): Unit = {
         Thread.sleep(10000)
         println("Hallelujah!") // should not see this
       }
@@ -18,7 +20,7 @@ object Test {
 
   def nonDaemon() = {
     val t = new Thread {
-      override def run() {
+      override def run(): Unit = {
         Thread.sleep(100)
         println("Fooblitzky!")
       }

@@ -1,3 +1,15 @@
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
+
 package scala
 package reflect
 package api
@@ -13,12 +25,11 @@ import scala.collection.immutable.ListMap
  *
  *  <ul>
  *  <li>''Java annotations'': annotations on definitions produced by the Java compiler, i.e., subtypes of [[java.lang.annotation.Annotation]]
- *  attached to program definitions. When read by Scala reflection, the [[scala.annotation.ClassfileAnnotation]] trait
- *  is automatically added as a subclass to every Java annotation.</li>
+ *  attached to program definitions.</li>
  *  <li>''Scala annotations'': annotations on definitions or types produced by the Scala compiler.</li>
  *  </ul>
  *
- *  When a Scala annotation that inherits from [[scala.annotation.StaticAnnotation]] or [[scala.annotation.ClassfileAnnotation]] is compiled,
+ *  When a Scala annotation that inherits from [[scala.annotation.StaticAnnotation]] is compiled,
  *  it is stored as special attributes in the corresponding classfile, and not as a Java annotation. Note that subclassing
  *  just [[scala.annotation.Annotation]] is not enough to have the corresponding metadata persisted for runtime reflection.
  *
@@ -102,112 +113,4 @@ trait Annotations { self: Universe =>
    */
   @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
   trait JavaArgumentApi
-
-  /** A literal argument to a Java annotation as `"use X instead"` in `@Deprecated("use X instead")`
-   *  @template
-   *  @group Annotations
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  type LiteralArgument >: Null <: LiteralArgumentApi with JavaArgument
-
-  /** The constructor/extractor for `LiteralArgument` instances.
-   *  @group Extractors
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  val LiteralArgument: LiteralArgumentExtractor
-
-  /** An extractor class to create and pattern match with syntax `LiteralArgument(value)`
-   *  where `value` is the constant argument.
-   *  @group Extractors
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  abstract class LiteralArgumentExtractor {
-    @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-    def apply(value: Constant): LiteralArgument
-    @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-    def unapply(arg: LiteralArgument): Option[Constant]
-  }
-
-  /** The API of `LiteralArgument` instances.
-   *  The main source of information about annotations is the [[scala.reflect.api.Annotations]] page.
-   *  @group API
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  trait LiteralArgumentApi {
-    /** The underlying compile-time constant value. */
-    @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-    def value: Constant
-  }
-
-  /** An array argument to a Java annotation as in `@Target(value={TYPE,FIELD,METHOD,PARAMETER})`
-   *  @template
-   *  @group Annotations
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  type ArrayArgument >: Null <: ArrayArgumentApi with JavaArgument
-
-  /** The constructor/extractor for `ArrayArgument` instances.
-   *  @group Extractors
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  val ArrayArgument: ArrayArgumentExtractor
-
-  /** An extractor class to create and pattern match with syntax `ArrayArgument(args)`
-   *  where `args` is the argument array.
-   *  @group Extractors
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  abstract class ArrayArgumentExtractor {
-    @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-    def apply(args: Array[JavaArgument]): ArrayArgument
-    @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-    def unapply(arg: ArrayArgument): Option[Array[JavaArgument]]
-  }
-
-  /** API of `ArrayArgument` instances.
-   *  The main source of information about annotations is the [[scala.reflect.api.Annotations]] page.
-   *  @group API
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  trait ArrayArgumentApi {
-    /** The underlying array of Java annotation arguments. */
-    @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-    def args: Array[JavaArgument]
-  }
-
-  /** A nested annotation argument to a Java annotation as `@Nested` in `@Outer(@Nested)`.
-   *  @template
-   *  @group Annotations
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  type NestedArgument >: Null <: NestedArgumentApi with JavaArgument
-
-  /** The constructor/extractor for `NestedArgument` instances.
-   *  @group Extractors
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  val NestedArgument: NestedArgumentExtractor
-
-  /** An extractor class to create and pattern match with syntax `NestedArgument(annotation)`
-   *  where `annotation` is the nested annotation.
-   *  @group Extractors
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  abstract class NestedArgumentExtractor {
-    @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-    def apply(annotation: Annotation): NestedArgument
-    @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-    def unapply(arg: NestedArgument): Option[Annotation]
-  }
-
-  /** API of `NestedArgument` instances.
-   *  The main source of information about annotations is the [[scala.reflect.api.Annotations]] page.
-   *  @group API
-   */
-  @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-  trait NestedArgumentApi {
-    /** The underlying nested annotation. */
-    @deprecated("use `Annotation.tree` to inspect annotation arguments", "2.11.0")
-    def annotation: Annotation
-  }
 }

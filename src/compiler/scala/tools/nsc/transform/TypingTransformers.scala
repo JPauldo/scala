@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -25,10 +32,10 @@ trait TypingTransformers {
     override final def atOwner[A](owner: Symbol)(trans: => A): A = atOwner(curTree, owner)(trans)
 
     def atOwner[A](tree: Tree, owner: Symbol)(trans: => A): A = {
-      val savedLocalTyper = localTyper
-      localTyper = localTyper.atOwner(tree, if (owner.isModuleNotMethod) owner.moduleClass else owner)
+      val savedContext = localTyper.context
+      localTyper.context = localTyper.context.make(tree, if (owner.isModuleNotMethod) owner.moduleClass else owner)
       val result = super.atOwner(owner)(trans)
-      localTyper = savedLocalTyper
+      localTyper.context = savedContext
       result
     }
 
@@ -37,11 +44,11 @@ trait TypingTransformers {
       tree match {
         case Template(_, _, _) =>
           // enter template into context chain
-          atOwner(currentOwner) { super.transform(tree) }
+          atOwner(currentOwner) { tree.transform(this) }
         case PackageDef(_, _) =>
-          atOwner(tree.symbol) { super.transform(tree) }
+          atOwner(tree.symbol) { tree.transform(this) }
         case _ =>
-          super.transform(tree)
+          tree.transform(this)
       }
     }
   }

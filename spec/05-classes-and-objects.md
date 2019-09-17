@@ -63,14 +63,15 @@ The _least proper supertype_ of a template is the class type or
 class types.
 
 The statement sequence $\mathit{stats}$ contains member definitions that
-define new members or overwrite members in the parent classes.  If the
-template forms part of an abstract class or trait definition, the
-statement part $\mathit{stats}$ may also contain declarations of abstract
-members. If the template forms part of a concrete class definition,
+define new members or override members in the parent classes.  If the
+template forms part of an abstract class or trait definition, then
+$\mathit{stats}$ may also contain declarations of abstract members.
+If the template forms part of a concrete class definition,
 $\mathit{stats}$ may still contain declarations of abstract type members, but
 not of abstract term members.  Furthermore, $\mathit{stats}$ may in any case
-also contain expressions; these are executed in the order they are
-given as part of the initialization of a template.
+also contain strictly evaluated expressions: these are executed in the order they are
+given as part of the initialization of a template, even if they appear in
+the definition of overridden members.
 
 The sequence of template statements may be prefixed with a formal
 parameter definition and an arrow, e.g. `$x$ =>`, or
@@ -823,11 +824,10 @@ Consider the class definition
 
 ```scala
 class LinkedList[A]() {
-  var head = _
-  var tail = null
-  def isEmpty = tail != null
+  var head: A = _
+  var tail: LinkedList[A] = null
   def this(head: A) = { this(); this.head = head }
-  def this(head: A, tail: List[A]) = { this(head); this.tail = tail }
+  def this(head: A, tail: LinkedList[A]) = { this(head); this.tail = tail }
 }
 ```
 
@@ -854,9 +854,8 @@ a `val` or `var` modifier. Hence, an accessor
 definition for the parameter is [generated](#class-definitions).
 
 A case class definition of `$c$[$\mathit{tps}\,$]($\mathit{ps}_1\,$)$\ldots$($\mathit{ps}_n$)` with type
-parameters $\mathit{tps}$ and value parameters $\mathit{ps}$ implicitly
-generates an [extractor object](08-pattern-matching.html#extractor-patterns) which is
-defined as follows:
+parameters $\mathit{tps}$ and value parameters $\mathit{ps}$ implies
+the definition of a companion object, which serves as an [extractor object](08-pattern-matching.html#extractor-patterns). It has the following shape:
 
 ```scala
 object $c$ {
@@ -873,11 +872,13 @@ each $\mathit{xs}\_i$ denotes the parameter names of the parameter
 section $\mathit{ps}\_i$, and
 $\mathit{xs}\_{11}, \ldots , \mathit{xs}\_{1k}$ denote the names of all parameters
 in the first parameter section $\mathit{xs}\_1$.
-If a type parameter section is missing in the
-class, it is also missing in the `apply` and
-`unapply` methods.
-The definition of `apply` is omitted if class $c$ is
-`abstract`.
+If a type parameter section is missing in the class, it is also missing in the `apply` and `unapply` methods.
+
+If the companion object $c$ is already defined,
+the  `apply` and `unapply` methods are added to the existing object.
+If the object $c$ already has a [matching](#definition-matching)
+`apply` (or `unapply`) member, no new definition is added.
+The definition of `apply` is omitted if class $c$ is `abstract`.
 
 If the case class definition contains an empty value parameter list, the
 `unapply` method returns a `Boolean` instead of an `Option` type and
@@ -890,9 +891,6 @@ def unapply[$\mathit{tps}\,$]($x$: $c$[$\mathit{tps}\,$]) = x ne null
 The name of the `unapply` method is changed to `unapplySeq` if the first
 parameter section $\mathit{ps}_1$ of $c$ ends in a
 [repeated parameter](04-basic-declarations-and-definitions.html#repeated-parameters).
-If a companion object $c$ exists already, no new object is created,
-but the `apply` and `unapply` methods are added to the existing
-object instead.
 
 A method named `copy` is implicitly added to every case class unless the
 class already has a member (directly defined or inherited) with that name, or the
@@ -1019,7 +1017,7 @@ is undefined for the given key. This class is implemented as follows.
 ```scala
 abstract class Table[A, B](defaultValue: B) {
   def get(key: A): Option[B]
-  def set(key: A, value: B)
+  def set(key: A, value: B): Unit
   def apply(key: A) = get(key) match {
     case Some(value) => value
     case None => defaultValue
@@ -1031,8 +1029,8 @@ Here is a concrete implementation of the `Table` class.
 
 ```scala
 class ListTable[A, B](defaultValue: B) extends Table[A, B](defaultValue) {
-  private var elems: List[(A, B)]
-  def get(key: A) = elems.find(._1.==(key)).map(._2)
+  private var elems: List[(A, B)] = Nil
+  def get(key: A) = elems.find(_._1 == key).map(_._2)
   def set(key: A, value: B) = { elems = (key, value) :: elems }
 }
 ```
@@ -1044,7 +1042,7 @@ Here is a trait that prevents concurrent access to the
 trait SynchronizedTable[A, B] extends Table[A, B] {
   abstract override def get(key: A): B =
     synchronized { super.get(key) }
-  abstract override def set((key: A, value: B) =
+  abstract override def set(key: A, value: B) =
     synchronized { super.set(key, value) }
 }
 ```
@@ -1062,7 +1060,7 @@ table with strings as keys and integers as values and with a default
 value `0`:
 
 ```scala
-object MyTable extends ListTable[String, Int](0) with SynchronizedTable
+object MyTable extends ListTable[String, Int](0) with SynchronizedTable[String, Int]
 ```
 
 The object `MyTable` inherits its `get` and `set`

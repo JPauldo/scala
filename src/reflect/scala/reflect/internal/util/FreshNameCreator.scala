@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.reflect.internal
@@ -20,8 +27,9 @@ class FreshNameCreator(creatorPrefix: String = "") {
    */
   def newName(prefix: String): String = {
     val safePrefix = NameTransformer.encode(prefix)
-    counters.putIfAbsent(safePrefix, new AtomicLong(0))
-    val idx = counters.get(safePrefix).incrementAndGet()
-    s"$creatorPrefix$safePrefix$idx"
+    val counter = counters.computeIfAbsent(safePrefix, (s: String) => new AtomicLong(0))
+    val idx = counter.incrementAndGet()
+    creatorPrefix + safePrefix + idx
   }
+
 }

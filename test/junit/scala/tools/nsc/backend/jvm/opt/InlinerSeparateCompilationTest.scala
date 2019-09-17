@@ -6,11 +6,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
-import scala.tools.testing.BytecodeTesting._
+import scala.tools.testkit.BytecodeTesting._
 
 @RunWith(classOf[JUnit4])
 class InlinerSeparateCompilationTest {
-  val args = "-opt:l:classpath"
+  val args = "-opt:l:inline -opt-inline-from:**"
 
   @Test
   def inlineMixedinMember(): Unit = {

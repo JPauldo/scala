@@ -6,7 +6,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
-import scala.tools.testing.AssertUtil._
+import scala.tools.testkit.AssertUtil._
 
 /** The java version property uses the spec version
  *  and must work for legacy "major.minor" and plain version_number,
@@ -33,10 +33,12 @@ class SpecVersionTest {
     assert(sut9 isJavaAtLeast "1.8")
     assert(sut9 isJavaAtLeast "8")
     assert(sut9 isJavaAtLeast "9")
+    assert(sut9.isJavaAtLeast(9))
+    assertFalse(sut9.isJavaAtLeast(10))
     assertFalse(sut9.isJavaAtLeast("10"))
   }
 
-  // SI-7265
+  // scala/bug#7265
   @Test
   def comparesCorrectly(): Unit = {
     val sut7 = new TestProperties("1.7")
@@ -46,6 +48,8 @@ class SpecVersionTest {
     assert(sut7 isJavaAtLeast "1.6")
     assert(sut7 isJavaAtLeast "1.7")
     assert(sut7.isJavaAtLeast("7"))
+    assert(sut7.isJavaAtLeast(7))
+    assertFalse(sut7.isJavaAtLeast(9))
     assertFalse(sut7.isJavaAtLeast("9"))
     assertFalse(sut7 isJavaAtLeast "1.8")
     assertFalse(sut7 isJavaAtLeast "9")
@@ -67,6 +71,7 @@ class SpecVersionTest {
 
   @Test def `spec has minor or more`(): Unit = {
     val sut = new TestProperties("9.2.5")
+    assert(sut.isJavaAtLeast(9))
     assert(sut.isJavaAtLeast("9"))
     assert(sut.isJavaAtLeast("9.0.1"))
     assert(sut.isJavaAtLeast("9.2.1"))
@@ -78,6 +83,7 @@ class SpecVersionTest {
 
   @Test def `compares only major minor security`(): Unit = {
     val sut = new TestProperties("9.2.5.1.2.3")
+    assert(sut.isJavaAtLeast(9))
     assert(sut.isJavaAtLeast("9"))
     assert(sut.isJavaAtLeast("9.0.1"))
     assert(sut.isJavaAtLeast("9.2.5.9.9.9"))
@@ -86,8 +92,10 @@ class SpecVersionTest {
 
   @Test def `futurely proofed`(): Unit = {
     val sut = new TestProperties("10.2.5")
-    assert(sut.isJavaAtLeast("10"))
+    assert(sut.isJavaAtLeast(9))
+    assert(sut.isJavaAtLeast(10))
     assert(sut.isJavaAtLeast("9"))
+    assert(sut.isJavaAtLeast("10"))
     assert(sut.isJavaAtLeast("9.0.1"))
     assert(sut.isJavaAtLeast("9.2.1"))
     assert(sut.isJavaAtLeast("8.3.1"))

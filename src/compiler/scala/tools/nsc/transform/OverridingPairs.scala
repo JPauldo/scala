@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -31,11 +38,30 @@ abstract class OverridingPairs extends SymbolPairs {
     /** Types always match. Term symbols match if their member types
      *  relative to `self` match.
      */
-    override protected def matches(lo: Symbol, high: Symbol) = lo.isType || (
-         (lo.owner != high.owner)     // don't try to form pairs from overloaded members
-      && !high.isPrivate              // private or private[this] members never are overridden
-      && !exclude(lo)                 // this admits private, as one can't have a private member that matches a less-private member.
-      && ((self memberType lo) matches (self memberType high))
+    override protected def matches(high: Symbol) = low.isType || (
+         (low.owner != high.owner)     // don't try to form pairs from overloaded members
+      && !bothJavaOwnedAndEitherIsField(low, high)
+      && !high.isPrivate               // private or private[this] members never are overridden
+      && !exclude(low)                 // this admits private, as one can't have a private member that matches a less-private member.
+      && (lowMemberType matches (self memberType high))
     ) // TODO we don't call exclude(high), should we?
+  }
+
+  private def bothJavaOwnedAndEitherIsField(low: Symbol, high: Symbol): Boolean = {
+    low.owner.isJavaDefined && high.owner.isJavaDefined &&
+      (low.isField || high.isField)
+  }
+
+  final class BridgesCursor(base: Symbol) extends Cursor(base) {
+    // Varargs bridges may need generic bridges due to the non-repeated part of the signature of the involved methods.
+    // The vararg bridge is generated during refchecks (probably to simplify override checking),
+    // but then the resulting varargs "bridge" method may itself need an actual erasure bridge.
+    // TODO: like javac, generate just one bridge method that wraps Seq <-> varargs and does erasure-induced casts
+    override def exclude(sym: Symbol) = !sym.isMethod || super.exclude(sym)
+
+    // Skip if the (non-trait) class in `parents` is a subclass of the owners of both low and high.
+    // Correctness of bridge generation relies on visiting each such class only once.
+    override def skipOwnerPair(lowClass: Symbol, highClass: Symbol): Boolean =
+      nonTraitParent.isNonBottomSubClass(lowClass) && nonTraitParent.isNonBottomSubClass(highClass)
   }
 }

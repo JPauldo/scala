@@ -199,6 +199,19 @@ object PolyObject extends App {
       tramp[A](x - 1)
     else
       0
+
+  def size[A](a: A, len: A => Int, tail: List[Either[String, Int]], acc: Int): Int = {
+    val acc1 = acc + len(a)
+    tail match {
+      case Nil           =>                              acc1
+      case Left(s)  :: t => size[String](s, _.length, t, acc1)
+      case Right(i) :: t => size[Int]   (i, _ => 1,   t, acc1)
+    }
+  }
+
+  def specializedSize[@specialized(Int) A](len: A => Int, as: List[A], acc: Int): Int =
+    if(as.isEmpty) acc
+    else specializedSize[A](len, as.tail, acc + len(as.head))
 }
 
 
@@ -267,7 +280,7 @@ class NonTailCall {
 // Test code
 
 object Test {
-  def check_success(name: String, closure: => Int, expected: Int) {
+  def check_success(name: String, closure: => Int, expected: Int): Unit = {
     print("test " + name)
     try {
       val actual: Int = closure
@@ -284,7 +297,7 @@ object Test {
     println
   }
 
-  def check_success_b(name: String, closure: => Boolean, expected: Boolean) {
+  def check_success_b(name: String, closure: => Boolean, expected: Boolean): Unit = {
     print("test " + name)
     try {
       val actual: Boolean = closure
@@ -301,12 +314,12 @@ object Test {
     println
   }
 
-  def check_overflow(name: String, closure: => Int) {
+  def check_overflow(name: String, closure: => Int): Unit = {
     print("test " + name)
     try {
       val actual: Int = closure;
     } catch {
-      case exception: compat.Platform.StackOverflowError =>
+      case exception: StackOverflowError =>
         println(" was successful")
       case exception: Throwable => {
         print(" raised exception " + exception)
@@ -325,13 +338,13 @@ object Test {
         if (n >= Int.MaxValue / 2) sys.error("calibration failure");
         n = 2 * n;
       } catch {
-        case exception: compat.Platform.StackOverflowError => stop = true
+        case exception: StackOverflowError => stop = true
       }
     }
     4 * n
   }
 
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
     // compute min and max iteration number
     val min = 16;
     val max = if (scala.tools.partest.utils.Properties.isAvian) 10000 else calibrate
@@ -410,6 +423,9 @@ object Test {
     check_success_b("FancyTailCalls.tcInPatternGuard", FancyTailCalls.tcInPatternGuard(max, max), true)
     check_success("FancyTailCalls.differentInstance", FancyTailCalls.differentInstance(max, 42), 42)
     check_success("PolyObject.tramp", PolyObject.tramp[Int](max), 0)
+    check_success("PolyObject.size", PolyObject.size[Int](1, _ => 1, (1 to 5000).toList.flatMap(_ => List(Left("hi"), Right(5))), 0), 15001)
+    check_success("PolyObject.specializedSize[Int]", PolyObject.specializedSize[Int](_ => 1, (1 to 5000).toList, 0), 5000)
+    check_success("PolyObject.specializedSize[String]", PolyObject.specializedSize[String](_.length, List.fill(5000)("hi"), 0), 10000)
   }
 
   // testing explicit tailcalls.

@@ -1,7 +1,19 @@
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
+
 package scala.reflect.macros
 package compiler
 
-import scala.compat.Platform.EOL
+import scala.annotation.tailrec
 import scala.reflect.macros.util.Traces
 
 trait Errors extends Traces {
@@ -48,7 +60,7 @@ trait Errors extends Traces {
       "macro [<macro bundle>].<method name>[[<type args>]]")
 
     def MacroImplWrongNumberOfTypeArgumentsError() = {
-      val diagnostic = if (macroImpl.typeParams.length > targs.length) "has too few type arguments" else "has too many arguments"
+      val diagnostic = if (macroImpl.typeParams.sizeCompare(targs) > 0) "has too few type arguments" else "has too many arguments"
       implRefError(s"macro implementation reference $diagnostic for " + treeSymTypeMsg(macroImplRef))
     }
 
@@ -92,8 +104,9 @@ trait Errors extends Traces {
     private def checkConforms(slot: String, rtpe: Type, atpe: Type) = {
       val verbose = macroDebugVerbose
 
+      @tailrec
       def check(rtpe: Type, atpe: Type): Boolean = {
-        def success() = { if (verbose) println(rtpe + " <: " + atpe + "?" + EOL + "true"); true }
+        def success() = { if (verbose) println(f"$rtpe <: $atpe?%ntrue"); true }
         (rtpe, atpe) match {
           case _ if rtpe eq atpe => success()
           case (TypeRef(_, RepeatedParamClass, rtpe :: Nil), TypeRef(_, RepeatedParamClass, atpe :: Nil)) => check(rtpe, atpe)

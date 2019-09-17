@@ -4,7 +4,7 @@ object Test {
   def rangeForeach(range : Range) = {
     val buffer = new scala.collection.mutable.ListBuffer[Int];
     range.foreach(buffer += _);
-    assert(buffer.toList == range.iterator.toList, buffer.toList+"/"+range.iterator.toList)
+    assert(buffer.toList == range.iterator.toList, buffer.toList.toString + "/" + range.iterator.toList)
   }
 
   def boundaryTests() = {
@@ -36,7 +36,7 @@ object Test {
 
     def gr1 = NumericRange(x, x, x)
     def gr2 = NumericRange.inclusive(x, x, x)
-    def gr3 = NumericRange(x, x * fromInt(4), x * fromInt(2))  // SI-9348
+    def gr3 = NumericRange(x, x * fromInt(4), x * fromInt(2))  // scala/bug#9348
     def gr4 = NumericRange(x, x * fromInt(-2), x * fromInt(-2))
     def gr5 = NumericRange(x, x * fromInt(10), x)
     def gr6 = NumericRange.inclusive(x, x * fromInt(10), x)
@@ -54,14 +54,12 @@ object Test {
 
   def main(args: Array[String]): Unit = {
     implicit val imp1 = Numeric.BigDecimalAsIfIntegral
-    implicit val imp2 = Numeric.DoubleAsIfIntegral
 
     val _grs = List[GR[_]](
       GR(BigDecimal(5.0)),
-      GR(BigDecimal(0.25)),  // SI-9348
+      GR(BigDecimal(0.25)),  // scala/bug#9348
       GR(BigInt(5)),
       GR(5L),
-      GR(5.0d),
       GR(2.toByte)
     )
     val grs = _grs ::: (_grs map (_.negated))

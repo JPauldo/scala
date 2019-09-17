@@ -7,10 +7,10 @@ import scala.tools.nsc.reporters.ConsoleReporter
 
 object Test extends DirectTest {
 
-  override def extraSettings: String = "-usejavacp -Xprint:parser -Yrangepos -Ystop-after:parser -d " + testOutput.path
+  override def extraSettings: String = "-usejavacp -Vprint:parser -Yrangepos -Ystop-after:parser -d " + testOutput.path
 
   override def code = """
-    // SI-5527
+    // scala/bug#5527
     object UselessComments {
 
       var z = 0
@@ -50,7 +50,7 @@ object Test extends DirectTest {
           false
       }
 
-      def test5 {
+      def test5: Unit = {
         /** @martin is this right? It shouldn't flag me as scaladoc. */
         if (true) ???
       }
@@ -85,7 +85,7 @@ object Test extends DirectTest {
         val i = 10 */** Important!
                      *  We have to multiply here!
                      *  @author community
-                     *  @see SI-1234
+                     *  @see scala/bug#1234
                      */
                 10
         assert(i == 100)
@@ -108,7 +108,7 @@ object Test extends DirectTest {
         /** T */
         type T
         /** f */
-        def f(i: Int)
+        def f(i: Int): Unit
         /** v */
         val v = 1
         /** u */
@@ -150,6 +150,4 @@ object Test extends DirectTest {
     val command = new ScalaDoc.Command((CommandLineParser tokenize extraSettings) ++ args.toList, settings)
     new DocFactory(new ConsoleReporter(settings), settings).compiler
   }
-
-  override def isDebug = false // so we don't get the newSettings warning
 }

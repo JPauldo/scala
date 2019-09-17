@@ -1,3 +1,15 @@
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
+
 package scala
 package reflect
 package runtime
@@ -5,7 +17,9 @@ package runtime
 import scala.reflect.internal.{TreeInfo, SomePhase}
 import scala.reflect.internal.{SymbolTable => InternalSymbolTable}
 import scala.reflect.runtime.{SymbolTable => RuntimeSymbolTable}
+import scala.reflect.internal.util.Statistics
 import scala.reflect.api.{TypeCreator, Universe}
+import scala.reflect.internal.util.Statistics
 
 /** An implementation of [[scala.reflect.api.Universe]] for runtime reflection using JVM classloaders.
  *
@@ -18,12 +32,13 @@ class JavaUniverse extends InternalSymbolTable with JavaUniverseForce with Refle
   def erasurePhase = SomePhase
   lazy val settings = new Settings
 
-  private val isLogging = sys.props contains "scala.debug.reflect"
+  override final val statistics = new Statistics(JavaUniverse.this, settings) with ReflectStats
+  private[this] val isLogging = System.getProperty("scala.debug.reflect") != null
   def log(msg: => AnyRef): Unit = if (isLogging) Console.err.println("[reflect] " + msg)
 
   // TODO: why put output under isLogging? Calls to inform are already conditional on debug/verbose/...
-  import scala.reflect.internal.{Reporter, ReporterImpl}
-  override def reporter: Reporter = new ReporterImpl {
+  import scala.reflect.internal.Reporter
+  override def reporter: Reporter = new Reporter {
     protected def info0(pos: Position, msg: String, severity: Severity, force: Boolean): Unit = log(msg)
   }
 
@@ -44,7 +59,7 @@ class JavaUniverse extends InternalSymbolTable with JavaUniverseForce with Refle
 
   override lazy val internal: Internal = new SymbolTableInternal {
     override def typeTagToManifest[T: ClassTag](mirror0: Any, tag: Universe # TypeTag[T]): Manifest[T] = {
-      // SI-6239: make this conversion more precise
+      // scala/bug#6239: make this conversion more precise
       val mirror = mirror0.asInstanceOf[Mirror]
       val runtimeClass = mirror.runtimeClass(tag.in(mirror).tpe)
       Manifest.classType(runtimeClass).asInstanceOf[Manifest[T]]
@@ -135,7 +150,7 @@ class JavaUniverse extends InternalSymbolTable with JavaUniverseForce with Refle
   // 5) That will crash PackageScope.enter that helpfully detects double-enters.
   //
   // Therefore, before initializing ScalaPackageClass, we must pre-initialize ObjectClass
-  def init() {
+  def init(): Unit = {
     definitions.init()
 
     // workaround for http://groups.google.com/group/scala-internals/browse_thread/thread/97840ba4fd37b52e

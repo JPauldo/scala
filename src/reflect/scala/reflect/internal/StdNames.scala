@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala
@@ -31,7 +38,7 @@ trait StdNames {
    *  CommonNames constructor out of the starting gate.  This is its builder.
    */
   private class KeywordSetBuilder {
-    private var kws: Set[TermName] = Set()
+    private[this] var kws: Set[TermName] = Set()
     def apply(s: String): TermName = {
       val result = newTermNameCached(s)
       kws = kws + result
@@ -47,30 +54,27 @@ trait StdNames {
     /**
      * COMPACTIFY
      *
-     * The hashed name has the form (prefix + marker + md5 + marker + suffix), where
-     *   - prefix/suffix.length = MaxNameLength / 4
-     *   - md5.length = 32
+     * The maximum length of a filename on some platforms is 240 chars (docker).
+     * Therefore, compactify names that would create a filename longer than that.
+     * A compactified name looks like
+     *     prefix + $$$$ + md5 + $$$$ + suffix,
+     * where the prefix and suffix are the first and last quarter of the name,
+     * respectively.
      *
-     * We obtain the formula:
-     *
-     *   FileNameLength = 2*(MaxNameLength / 4) + 2.marker.length + 32 + suffixLength
-     *
-     * (+suffixLength for ".class" and potential module class suffix that is added *after* this transform).
-     *
-     * MaxNameLength can therefore be computed as follows:
+     * So how long is too long? For a (flattened class) name, the resulting file
+     * will be called "name.class", or, if it's a module class, "name$.class"
+     * (see scala/bug#8199). Therefore the maximum suffix is 7 characters, and
+     * names that are over (240 - 7) characters get compactified.
      */
-    val marker = "$$$$"
-    val maxSuffixLength = "$.class".length + 1 // potential module class suffix and file extension
-    val MaxNameLength = math.min(
-      settings.maxClassfileName.value - maxSuffixLength,
-      2 * (settings.maxClassfileName.value - maxSuffixLength - 2*marker.length - 32)
-    )
+    final val marker          = "$$$$"
+    final val MaxSuffixLength = 7 // "$.class".length + 1 // potential module class suffix and file extension
+    final val MaxNameLength   = 240 - MaxSuffixLength
     def toMD5(s: String, edge: Int): String = {
       val prefix = s take edge
       val suffix = s takeRight edge
 
       val cs = s.toArray
-      val bytes = Codec toUTF8 cs
+      val bytes = Codec.toUTF8(new scala.runtime.ArrayCharSequence(cs, 0, cs.length))
       md5 update bytes
       val md5chars = (md5.digest() map (b => (b & 0xFF).toHexString)).mkString
 
@@ -89,8 +93,10 @@ trait StdNames {
     protected val stringToTypeName = null
     protected implicit def createNameType(name: String): NameType
 
-    def flattenedName(segments: Name*): NameType =
-      compactify(segments mkString NAME_JOIN_STRING)
+    def flattenedName(owner: Symbol, name: Name): NameType = {
+      val flat = owner.name.toString + NAME_JOIN_STRING + name.toString
+      if (owner.isJava) flat else compactify(flat) // scala/bug#11277
+    }
 
     // TODO: what is the purpose of all this duplication!?!?!
     // I made these constants because we cannot change them without bumping our major version anyway.
@@ -155,7 +161,9 @@ trait StdNames {
     final val TypeTag : NameType      = "TypeTag"
     final val Expr: NameType          = "Expr"
     final val String: NameType        = "String"
-    final val StringContext: NameType = "StringContext"
+
+    // some names whose name we utilize
+    final val StringContextName: NameType = "StringContext"
 
     // fictions we use as both types and terms
     final val ERROR: NameType    = "<error>"
@@ -166,7 +174,7 @@ trait StdNames {
   /** This should be the first trait in the linearization. */
   // abstract class Keywords extends CommonNames {
   abstract class Keywords extends {
-    private val kw = new KeywordSetBuilder
+    private[this] val kw = new KeywordSetBuilder
 
     final val ABSTRACTkw: TermName  = kw("abstract")
     final val CASEkw: TermName      = kw("case")
@@ -256,11 +264,11 @@ trait StdNames {
     final val Singleton: NameType       = "Singleton"
     final val Throwable: NameType       = "Throwable"
     final val unchecked: NameType       = "unchecked"
+    final val ValueOf: NameType         = "ValueOf"
 
     final val api: NameType                 = "api"
     final val Annotation: NameType          = "Annotation"
     final val CaseDef: NameType             = "CaseDef"
-    final val ClassfileAnnotation: NameType = "ClassfileAnnotation"
     final val ClassManifest: NameType       = "ClassManifest"
     final val Enum: NameType                = "Enum"
     final val Group: NameType               = "Group"
@@ -268,6 +276,7 @@ trait StdNames {
     final val Liftable: NameType            = "Liftable"
     final val Unliftable: NameType          = "Unliftable"
     final val Name: NameType                = "Name"
+    final val StaticAnnotation: NameType    = "StaticAnnotation"
     final val Tree: NameType                = "Tree"
     final val Text: NameType                = "Text"
     final val TermName: NameType            = "TermName"
@@ -284,7 +293,6 @@ trait StdNames {
     // Annotation simple names, used in Namer
     final val BeanPropertyAnnot: NameType = "BeanProperty"
     final val BooleanBeanPropertyAnnot: NameType = "BooleanBeanProperty"
-    final val bridgeAnnot: NameType = "bridge"
 
     // Classfile Attributes
     final val AnnotationDefaultATTR: NameType      = "AnnotationDefault"
@@ -312,6 +320,18 @@ trait StdNames {
     override type NameType = TermName
 
     protected implicit def createNameType(name: String): TermName = newTermNameCached(name)
+    // create a name with leading dollar, avoiding the appearance that
+    // interpolation of a value (possibly named "value") was intended
+    private class NameContext(s: String) {
+      def n(args: Any*): TermName = {
+        require(args.isEmpty, "Interpolating args in a name is not supported")
+        createNameType("$" + s)
+      }
+    }
+    private def StringContext(parts: String*) = {
+      require(parts.size == 1, "Interpolating multiple parts in a name is not supported")
+      new NameContext(parts.head)
+    }
 
     /** Base strings from which synthetic names are derived. */
     val BITMAP_PREFIX                  = "bitmap$"
@@ -333,10 +353,13 @@ trait StdNames {
     val FRESH_SUFFIX                   = "macro$" // uses a keyword to avoid collisions with mangled names
     val QUAL_PREFIX                    = "qual$"
     val NAMEDARG_PREFIX                = "x$"
+    val RIGHT_ASSOC_OP_PREFIX          = "rassoc$"
+    val STABILIZER_PREFIX              = "stabilizer$"
 
     // Compiler internal names
     val ANYname: NameType                  = "<anyname>"
     val CONSTRUCTOR: NameType              = "<init>"
+    val CLASS_CONSTRUCTOR: NameType        = "<clinit>"
     val DEFAULT_CASE: NameType             = "defaultCase$"
     val EQEQ_LOCAL_VAR: NameType           = "eqEqTemp$"
     val FAKE_LOCAL_THIS: NameType          = "this$"
@@ -349,7 +372,7 @@ trait StdNames {
     val MIRROR_UNTYPED: NameType           = "$m$untyped"
     val REIFY_FREE_PREFIX: NameType        = "free$"
     val REIFY_FREE_THIS_SUFFIX: NameType   = "$this"
-    val REIFY_FREE_VALUE_SUFFIX: NameType  = "$value"
+    val REIFY_FREE_VALUE_SUFFIX: NameType  = n"value"      // looks like missing interpolator due to `value` in scopre
     val REIFY_SYMDEF_PREFIX: NameType      = "symdef$"
     val QUASIQUOTE_CASE: NameType          = "$quasiquote$case$"
     val QUASIQUOTE_EARLY_DEF: NameType     = "$quasiquote$early$def$"
@@ -376,6 +399,10 @@ trait StdNames {
     val SPECIALIZED_INSTANCE: NameType     = "specInstance$"
     val STAR: NameType                     = "*"
     val THIS: NameType                     = "_$this"
+
+
+    val annottees: NameType               = "annottees"       // for macro annotations
+    val macroTransform: NameType          = "macroTransform"  // for macro annotations
 
     def isConstructorName(name: Name)       = name == CONSTRUCTOR || name == MIXIN_CONSTRUCTOR
     def isExceptionResultName(name: Name)   = name startsWith EXCEPTION_RESULT_PREFIX
@@ -404,6 +431,9 @@ trait StdNames {
       case _                                =>
       name.endChar == '=' && name.startChar != '=' && isOperatorPart(name.startChar)
     }
+
+    /** Is name a left-associative operator? */
+    def isLeftAssoc(operator: Name) = operator.nonEmpty && (operator.endChar != ':')
 
     private def expandedNameInternal(name: TermName, base: Symbol, separator: String): TermName =
       newTermNameCached(base.fullName('$') + separator + name)
@@ -482,7 +512,7 @@ trait StdNames {
       if (isConstructorName(name))
         DEFAULT_GETTER_INIT_STRING + pos
       else
-        name + DEFAULT_GETTER_STRING + pos
+        name.toString + DEFAULT_GETTER_STRING + pos
     )
     // Nominally, name from name$default$N, CONSTRUCTOR for <init>
     def defaultGetterToMethod(name: Name): TermName = (
@@ -502,6 +532,10 @@ trait StdNames {
 
     /** The name of a setter for protected symbols. Used for inherited Java fields. */
     def protSetterName(name: Name): TermName = newTermName(PROTECTED_SET_PREFIX + name)
+
+    private[this] val existentialNames = (0 to 22).map(existentialName0)
+    private def existentialName0(i: Int) = newTypeName("_" + i)
+    final def existentialName(i: Int): TypeName = if (i < existentialNames.length) existentialNames(i) else existentialName0(i)
 
     final val Nil: NameType                 = "Nil"
     final val Predef: NameType              = "Predef"
@@ -540,7 +574,7 @@ trait StdNames {
     val x_8 : NameType  = "x$8"
     val x_9 : NameType  = "x$9"
 
-    @switch def syntheticParamName(i: Int): TermName = i match {
+    def syntheticParamName(i: Int): TermName = (i: @switch) match {
       case 0  => nme.x_0
       case 1  => nme.x_1
       case 2  => nme.x_2
@@ -554,7 +588,7 @@ trait StdNames {
       case _  => newTermName("x$" + i)
     }
 
-    @switch def productAccessorName(j: Int): TermName = j match {
+    def productAccessorName(j: Int): TermName = (j: @switch) match {
       case 1  => nme._1
       case 2  => nme._2
       case 3  => nme._3
@@ -581,6 +615,10 @@ trait StdNames {
     }
 
     val ??? = encode("???")
+    val =:= = encode("=:=")
+    val <:< = encode("<:<")
+
+    val DummyImplicit: NameType    = "DummyImplicit"
 
     val wrapRefArray: NameType     = "wrapRefArray"
     val wrapByteArray: NameType    = "wrapByteArray"
@@ -593,6 +631,8 @@ trait StdNames {
     val wrapBooleanArray: NameType = "wrapBooleanArray"
     val wrapUnitArray: NameType    = "wrapUnitArray"
     val genericWrapArray: NameType = "genericWrapArray"
+
+    val copyArrayToImmutableIndexedSeq: NameType = "copyArrayToImmutableIndexedSeq"
 
     // Compiler utilized names
 
@@ -645,6 +685,7 @@ trait StdNames {
     val accessor: NameType             = "accessor"
     val add_ : NameType                = "add"
     val annotation: NameType           = "annotation"
+    val any2stringadd: NameType        = "any2stringadd"
     val anyHash: NameType              = "anyHash"
     val anyValClass: NameType          = "anyValClass"
     val apply: NameType                = "apply"
@@ -660,7 +701,7 @@ trait StdNames {
     val asModule: NameType             = "asModule"
     val asType: NameType               = "asType"
     val asInstanceOf_ : NameType       = "asInstanceOf"
-    val asInstanceOf_Ob : NameType     = "$asInstanceOf"
+    val asInstanceOf_Ob : NameType     = n"asInstanceOf"   // looks like missing interpolator due to Any member in scope
     val box: NameType                  = "box"
     val bytes: NameType                = "bytes"
     val c: NameType                    = "c"
@@ -668,7 +709,7 @@ trait StdNames {
     val classOf: NameType              = "classOf"
     val clone_ : NameType              = "clone"
     val collection: NameType           = "collection"
-    val conforms: NameType             = "$conforms" // dollar prefix to avoid accidental shadowing
+    val conforms: NameType             = n"conforms"       // $ prefix to avoid shadowing Predef.conforms
     val copy: NameType                 = "copy"
     val create: NameType               = "create"
     val currentMirror: NameType        = "currentMirror"
@@ -709,11 +750,12 @@ trait StdNames {
     val initialized : NameType         = "initialized"
     val internal: NameType             = "internal"
     val inlinedEquals: NameType        = "inlinedEquals"
+    val ioobe : NameType               = "ioobe"
     val isArray: NameType              = "isArray"
     val isDefinedAt: NameType          = "isDefinedAt"
     val isEmpty: NameType              = "isEmpty"
     val isInstanceOf_ : NameType       = "isInstanceOf"
-    val isInstanceOf_Ob : NameType     = "$isInstanceOf"
+    val isInstanceOf_Ob : NameType     = n"isInstanceOf"   // looks like missing interpolator due to Any member in scope
     val java: NameType                 = "java"
     val key: NameType                  = "key"
     val lang: NameType                 = "lang"
@@ -750,15 +792,20 @@ trait StdNames {
     val prefix : NameType              = "prefix"
     val productArity: NameType         = "productArity"
     val productElement: NameType       = "productElement"
+    val productElementName: NameType   = "productElementName"
     val productIterator: NameType      = "productIterator"
     val productPrefix: NameType        = "productPrefix"
+    val raw_ : NameType                = "raw"
     val readResolve: NameType          = "readResolve"
+    val releaseFence: NameType         = "releaseFence"
+    val refl: NameType                 = "refl"
     val reify : NameType               = "reify"
     val reificationSupport : NameType  = "reificationSupport"
     val rootMirror : NameType          = "rootMirror"
     val runtime: NameType              = "runtime"
     val runtimeClass: NameType         = "runtimeClass"
     val runtimeMirror: NameType        = "runtimeMirror"
+    val s: NameType                    = "s"
     val scala_ : NameType              = "scala"
     val selectDynamic: NameType        = "selectDynamic"
     val selectOverloadedMethod: NameType = "selectOverloadedMethod"
@@ -781,6 +828,7 @@ trait StdNames {
     val toArray: NameType              = "toArray"
     val toList: NameType               = "toList"
     val toObjectArray : NameType       = "toObjectArray"
+    val toSeq: NameType                = "toSeq"
     val toStats: NameType              = "toStats"
     val TopScope: NameType             = "TopScope"
     val toString_ : NameType           = "toString"
@@ -804,6 +852,7 @@ trait StdNames {
     val values : NameType              = "values"
     val wait_ : NameType               = "wait"
     val withFilter: NameType           = "withFilter"
+    val writeReplace: NameType         = "writeReplace"
     val xml: NameType                  = "xml"
     val zero: NameType                 = "zero"
 
@@ -1040,6 +1089,7 @@ trait StdNames {
     }
 
     def newBitmapName(bitmapPrefix: Name, n: Int) = bitmapPrefix append ("" + n)
+    def isTransientBitmap(name: Name) = name == nme.BITMAP_TRANSIENT || name == nme.BITMAP_CHECKINIT_TRANSIENT
 
     val BITMAP_NORMAL: NameType              = BITMAP_PREFIX + ""           // initialization bitmap for public/protected lazy vals
     val BITMAP_TRANSIENT: NameType           = BITMAP_PREFIX + "trans$"     // initialization bitmap for transient lazy vals
@@ -1091,7 +1141,7 @@ trait StdNames {
   }
 
   class JavaKeywords {
-    private val kw = new KeywordSetBuilder
+    private[this] val kw = new KeywordSetBuilder
 
     final val ABSTRACTkw: TermName     = kw("abstract")
     final val ASSERTkw: TermName       = kw("assert")
@@ -1154,21 +1204,15 @@ trait StdNames {
     protected val stringToTypeName = null
     protected implicit def createNameType(s: String): TypeName = newTypeNameCached(s)
 
-    final val BoxedBoolean: TypeName       = "java.lang.Boolean"
-    final val BoxedByte: TypeName          = "java.lang.Byte"
-    final val BoxedCharacter: TypeName     = "java.lang.Character"
-    final val BoxedDouble: TypeName        = "java.lang.Double"
-    final val BoxedFloat: TypeName         = "java.lang.Float"
-    final val BoxedInteger: TypeName       = "java.lang.Integer"
-    final val BoxedLong: TypeName          = "java.lang.Long"
-    final val BoxedNumber: TypeName        = "java.lang.Number"
-    final val BoxedShort: TypeName         = "java.lang.Short"
-    final val IOOBException: TypeName      = "java.lang.IndexOutOfBoundsException"
-    final val InvTargetException: TypeName = "java.lang.reflect.InvocationTargetException"
-    final val MethodAsObject: TypeName     = "java.lang.reflect.Method"
-    final val NPException: TypeName        = "java.lang.NullPointerException"
-    final val Object: TypeName             = "java.lang.Object"
-    final val Throwable: TypeName          = "java.lang.Throwable"
+    final val BoxedBoolean: String       = "java.lang.Boolean"
+    final val BoxedByte: String          = "java.lang.Byte"
+    final val BoxedCharacter: String     = "java.lang.Character"
+    final val BoxedDouble: String        = "java.lang.Double"
+    final val BoxedFloat: String         = "java.lang.Float"
+    final val BoxedInteger: String       = "java.lang.Integer"
+    final val BoxedLong: String          = "java.lang.Long"
+    final val BoxedNumber: String        = "java.lang.Number"
+    final val BoxedShort: String         = "java.lang.Short"
 
     final val GetCause: TermName         = newTermName("getCause")
     final val GetClass: TermName         = newTermName("getClass")
@@ -1181,7 +1225,7 @@ trait StdNames {
     final val AltMetafactory: TermName      = newTermName("altMetafactory")
     final val Bootstrap: TermName           = newTermName("bootstrap")
 
-    val Boxed = immutable.Map[TypeName, TypeName](
+    val Boxed = immutable.Map[TypeName, String](
       tpnme.Boolean -> BoxedBoolean,
       tpnme.Byte    -> BoxedByte,
       tpnme.Char    -> BoxedCharacter,

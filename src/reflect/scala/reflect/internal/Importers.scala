@@ -1,3 +1,15 @@
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
+
 package scala
 package reflect
 package internal
@@ -6,7 +18,7 @@ import scala.collection.mutable.WeakHashMap
 import scala.ref.WeakReference
 import scala.reflect.internal.Flags._
 
-// SI-6241: move importers to a mirror
+// scala/bug#6241: move importers to a mirror
 trait Importers { to: SymbolTable =>
 
   override def mkImporter(from0: api.Universe): Importer { val from: from0.type } = (
@@ -40,7 +52,7 @@ trait Importers { to: SymbolTable =>
     // fixups and maps prevent stackoverflows in importer
     var pendingSyms = 0
     var pendingTpes = 0
-    lazy val fixups = scala.collection.mutable.MutableList[Function0[Unit]]()
+    lazy val fixups = scala.collection.mutable.ListBuffer[Function0[Unit]]()
     def addFixup(fixup: => Unit): Unit = fixups += (() => fixup)
     def tryFixup(): Unit = {
       if (pendingSyms == 0 && pendingTpes == 0) {
@@ -193,7 +205,7 @@ trait Importers { to: SymbolTable =>
           myexisting.orElse {
             val my = cachedRecreateSymbol(their)
             if (myscope != NoType) {
-              assert(myscope.decls.lookup(myname) == NoSymbol, myname+" "+myscope.decl(myname)+" "+myexisting)
+              assert(myscope.decls.lookup(myname) == NoSymbol, s"$myname ${myscope.decl(myname)} $myexisting")
               myscope.decls enter my
             }
             my
@@ -347,8 +359,8 @@ trait Importers { to: SymbolTable =>
         new Function(vparams map importValDef, importTree(body))
       case from.Assign(lhs, rhs) =>
         new Assign(importTree(lhs), importTree(rhs))
-      case from.AssignOrNamedArg(lhs, rhs) =>
-        new AssignOrNamedArg(importTree(lhs), importTree(rhs))
+      case from.NamedArg(lhs, rhs) =>
+        new NamedArg(importTree(lhs), importTree(rhs))
       case from.If(cond, thenp, elsep) =>
         new If(importTree(cond), importTree(thenp), importTree(elsep))
       case from.Match(selector, cases) =>
@@ -444,8 +456,6 @@ trait Importers { to: SymbolTable =>
         LiteralAnnotArg(importConstant(constant))
       case from.ArrayAnnotArg(args) =>
         ArrayAnnotArg(args map importAnnotArg)
-      case from.ScalaSigBytes(bytes) =>
-        ScalaSigBytes(bytes)
       case from.NestedAnnotArg(annInfo) =>
         NestedAnnotArg(importAnnotationInfo(annInfo))
       case from.UnmappableAnnotArg =>

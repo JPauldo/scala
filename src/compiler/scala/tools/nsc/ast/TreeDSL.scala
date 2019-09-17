@@ -1,7 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
+/*
+ * Scala (https://www.scala-lang.org)
  *
- * @author  Paul Phillips
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
@@ -122,8 +128,10 @@ trait TreeDSL {
     }
     class TryStart(body: Tree, catches: List[CaseDef], fin: Tree) {
       def CATCH(xs: CaseDef*) = new TryStart(body, xs.toList, fin)
-      def ENDTRY              = Try(body, catches, fin)
+      def FINALLY(end: END.type) = Try(body, catches, fin)
+      def FINALLY(fin1: Tree) = Try(body, catches, fin1)
     }
+    object END
 
     def CASE(pat: Tree): CaseStart  = new CaseStart(pat, EmptyTree)
     def DEFAULT: CaseStart          = new CaseStart(Ident(nme.WILDCARD), EmptyTree)

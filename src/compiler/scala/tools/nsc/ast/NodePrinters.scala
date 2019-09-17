@@ -1,14 +1,20 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
 package ast
 
-import scala.compat.Platform.EOL
+import java.lang.System.{lineSeparator => EOL}
 import symtab.Flags._
-import scala.language.postfixOps
 import scala.reflect.internal.util.ListOfNil
 
 /** The object `nodePrinter` converts the internal tree
@@ -60,8 +66,8 @@ abstract class NodePrinters {
     def showAttributes(tree: Tree): String = {
       if (infolevel == InfoLevel.Quiet) ""
       else {
-        try   { List(showSymbol(tree), showType(tree)) filterNot (_ == "") mkString ", " trim }
-        catch { case ex: Throwable => "sym= <error> " + ex.getMessage }
+        try List(showSymbol(tree), showType(tree)).filterNot(_ == "").mkString(", ").trim
+        catch { case ex: Throwable => s"sym= <error> ${ex.getMessage}" }
       }
     }
   }
@@ -110,7 +116,7 @@ abstract class NodePrinters {
       }
       buf.toString
     }
-    def traverseAny(x: Any) {
+    def traverseAny(x: Any): Unit = {
       x match {
         case t: Tree      => traverse(t)
         case xs: List[_]  => printMultiline("List", "")(xs foreach traverseAny)
@@ -119,7 +125,7 @@ abstract class NodePrinters {
     }
     def println(s: String) = printLine(s, "")
 
-    def printLine(value: String, comment: String) {
+    def printLine(value: String, comment: String): Unit = {
       buf append "  " * level
       buf append value
       if (comment != "") {
@@ -145,8 +151,8 @@ abstract class NodePrinters {
         }
       str.toString
     }
-    def printModifiers(tree: MemberDef) {
-      // SI-5885: by default this won't print annotations of not yet initialized symbols
+    def printModifiers(tree: MemberDef): Unit = {
+      // scala/bug#5885: by default this won't print annotations of not yet initialized symbols
       val annots0 = tree.symbol.annotations match {
         case Nil  => tree.mods.annotations
         case xs   => xs map annotationInfoToString
@@ -162,14 +168,14 @@ abstract class NodePrinters {
       println(flagString + annots)
     }
 
-    def applyCommon(tree: Tree, fun: Tree, args: List[Tree]) {
+    def applyCommon(tree: Tree, fun: Tree, args: List[Tree]): Unit = {
       printMultiline(tree) {
         traverse(fun)
         traverseList("Nil", "argument")(args)
       }
     }
 
-    def typeApplyCommon(tree: Tree, fun: Tree, args: List[Tree]) {
+    def typeApplyCommon(tree: Tree, fun: Tree, args: List[Tree]): Unit = {
       printMultiline(tree) {
         traverse(fun)
         traverseList("[]", "type argument")(args)
@@ -177,10 +183,10 @@ abstract class NodePrinters {
     }
 
     def treePrefix(tree: Tree) = showPosition(tree) + tree.productPrefix
-    def printMultiline(tree: Tree)(body: => Unit) {
+    def printMultiline(tree: Tree)(body: => Unit): Unit = {
       printMultiline(treePrefix(tree), showAttributes(tree))(body)
     }
-    def printMultiline(prefix: String, comment: String)(body: => Unit) {
+    def printMultiline(prefix: String, comment: String)(body: => Unit): Unit = {
       printLine(prefix + "(", comment)
       indent(body)
       println(")")
@@ -192,22 +198,22 @@ abstract class NodePrinters {
       finally level -= 1
     }
 
-    def traverseList(ifEmpty: String, what: String)(trees: List[Tree]) {
+    def traverseList(ifEmpty: String, what: String)(trees: List[Tree]): Unit = {
       if (trees.isEmpty)
         println(ifEmpty)
       else if (trees.tail.isEmpty)
         traverse(trees.head)
       else {
-        printLine("", trees.length + " " + what + "s")
+        printLine("", "" + trees.length + " " + what + "s")
         trees foreach traverse
       }
     }
 
-    def printSingle(tree: Tree, name: Name) {
+    def printSingle(tree: Tree, name: Name): Unit = {
       println(treePrefix(tree) + "(" + showName(name) + ")" + showAttributes(tree))
     }
 
-    def traverse(tree: Tree) {
+    def traverse(tree: Tree): Unit = {
       showPosition(tree)
 
       tree match {
@@ -288,7 +294,7 @@ abstract class NodePrinters {
                 printLine("", "1 parameter list")
                 ps foreach traverse
               case pss        =>
-                printLine("", pss.length + " parameter lists")
+                printLine("", "" + pss.length + " parameter lists")
                 pss foreach (ps => traverseList("()", "parameter")(ps))
             }
             traverse(tpt)
@@ -358,12 +364,12 @@ abstract class NodePrinters {
     }
   }
 
-  def printUnit(unit: CompilationUnit) {
+  def printUnit(unit: CompilationUnit): Unit = {
     print("// Scala source: " + unit.source + "\n")
     println(Option(unit.body) map (x => nodeToString(x) + "\n") getOrElse "<null>")
   }
 
-  def printAll() {
+  def printAll(): Unit = {
     print("[[syntax trees at end of " + phase + "]]")
     global.currentRun.units foreach printUnit
   }

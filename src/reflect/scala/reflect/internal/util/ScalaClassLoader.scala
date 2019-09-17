@@ -1,22 +1,29 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala
 package reflect.internal.util
 
-import scala.language.implicitConversions
+import java.lang.invoke.{MethodHandles, MethodType}
 
-import java.lang.{ ClassLoader => JClassLoader }
+import scala.language.implicitConversions
+import java.lang.{ClassLoader => JClassLoader}
 import java.lang.reflect.Modifier
-import java.net.{ URLClassLoader => JURLClassLoader }
+import java.net.{URLClassLoader => JURLClassLoader}
 import java.net.URL
 
-import scala.reflect.runtime.ReflectionUtils.{ show, unwrapHandler }
-import ScalaClassLoader._
-import scala.util.control.Exception.{ catching }
-import scala.reflect.{ ClassTag, classTag }
+import scala.reflect.runtime.ReflectionUtils.{show, unwrapHandler}
+import scala.util.control.Exception.catching
+import scala.reflect.{ClassTag, classTag}
 
 trait HasClassPath {
   def classPathURLs: Seq[URL]
@@ -28,11 +35,11 @@ trait HasClassPath {
 trait ScalaClassLoader extends JClassLoader {
   /** Executing an action with this classloader as context classloader */
   def asContext[T](action: => T): T = {
-    val saved = contextLoader
+    import ScalaClassLoader.setContext
+    val saved = Thread.currentThread.getContextClassLoader
     try { setContext(this) ; action }
     finally setContext(saved)
   }
-  def setAsContext() { setContext(this) }
 
   /** Load and link a class with this classloader */
   def tryToLoadClass[T <: AnyRef](path: String): Option[Class[T]] = tryClass(path, initialize = false)
@@ -45,7 +52,7 @@ trait ScalaClassLoader extends JClassLoader {
 
   /** Create an instance of a class with this classloader */
   def create(path: String): AnyRef =
-    tryToInitializeClass[AnyRef](path).map(_.newInstance()).orNull
+    tryToInitializeClass[AnyRef](path).map(_.getConstructor().newInstance()).orNull
 
   /** Create an instance with ctor args, or invoke errorFn before throwing. */
   def create[T <: AnyRef : ClassTag](path: String, errorFn: String => Unit)(args: AnyRef*): T = {
@@ -87,7 +94,7 @@ trait ScalaClassLoader extends JClassLoader {
   }
 
   /** Run the main method of a class to be loaded by this classloader */
-  def run(objectName: String, arguments: Seq[String]) {
+  def run(objectName: String, arguments: Seq[String]): Unit = {
     val clsToRun = tryToInitializeClass(objectName) getOrElse (
       throw new ClassNotFoundException(objectName)
     )
@@ -118,20 +125,13 @@ object ScalaClassLoader {
   }
   def contextLoader = apply(Thread.currentThread.getContextClassLoader)
   def appLoader     = apply(JClassLoader.getSystemClassLoader)
-  def setContext(cl: JClassLoader) =
-    Thread.currentThread.setContextClassLoader(cl)
-  def savingContextLoader[T](body: => T): T = {
-    val saved = contextLoader
-    try body
-    finally setContext(saved)
-  }
+  def setContext(cl: JClassLoader) = Thread.currentThread.setContextClassLoader(cl)
 
   class URLClassLoader(urls: Seq[URL], parent: JClassLoader)
       extends JURLClassLoader(urls.toArray, parent)
          with ScalaClassLoader
          with HasClassPath {
-
-    private var classloaderURLs: Seq[URL] = urls
+    private[this] var classloaderURLs: Seq[URL] = urls
     def classPathURLs: Seq[URL] = classloaderURLs
 
     /** Override to widen to public */
@@ -145,8 +145,9 @@ object ScalaClassLoader {
     }
   }
 
-  def fromURLs(urls: Seq[URL], parent: ClassLoader = null): URLClassLoader =
-    new URLClassLoader(urls, parent)
+  def fromURLs(urls: Seq[URL], parent: ClassLoader = null): URLClassLoader = {
+    new URLClassLoader(urls, if (parent == null) bootClassLoader else parent)
+  }
 
   /** True if supplied class exists in supplied path */
   def classExists(urls: Seq[URL], name: String): Boolean =
@@ -155,4 +156,18 @@ object ScalaClassLoader {
   /** Finding what jar a clazz or instance came from */
   def originOfClass(x: Class[_]): Option[URL] =
     Option(x.getProtectionDomain.getCodeSource) flatMap (x => Option(x.getLocation))
+
+  private[this] val bootClassLoader: ClassLoader = {
+    if (!util.Properties.isJavaAtLeast("9")) null
+    else {
+      try {
+        MethodHandles.lookup().findStatic(classOf[ClassLoader], "getPlatformClassLoader", MethodType.methodType(classOf[ClassLoader])).invoke()
+      } catch {
+        case _: Throwable =>
+          null
+      }
+    }
+
+
+  }
 }

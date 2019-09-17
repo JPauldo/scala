@@ -16,7 +16,7 @@ object DefinitionDeconstructionProps
 
 trait TraitDeconstruction { self: QuasiquoteProperties =>
   property("exhaustive trait matcher") = test {
-    def matches(line: String) {
+    def matches(line: String): Unit = {
       val q"""$mods trait $name[..$targs]
               extends { ..$early } with ..$parents { $self => ..$body }""" = parse(line)
     }
@@ -74,7 +74,7 @@ trait ClassDeconstruction { self: QuasiquoteProperties =>
   }
 
   property("exhaustive class matcher") = test {
-    def matches(line: String) {
+    def matches(line: String): Unit = {
       val tree = parse(line)
       val q"""$classMods0 class $name0[..$targs0] $ctorMods0(...$argss0)
               extends { ..$early0 } with ..$parents0 { $self0 => ..$body0 }""" = tree
@@ -96,7 +96,7 @@ trait ClassDeconstruction { self: QuasiquoteProperties =>
     matches("case class Foo(x: Int)")
   }
 
-  property("SI-7979") = test {
+  property("scala/bug#7979") = test {
     val PARAMACCESSOR = (1 << 29).toLong.asInstanceOf[FlagSet]
     assertThrows[MatchError] {
       val SyntacticClassDef(_, _, _, _, _, _, _, _, _) =
@@ -112,7 +112,7 @@ trait ClassDeconstruction { self: QuasiquoteProperties =>
     }
   }
 
-  property("SI-8332") = test {
+  property("scala/bug#8332") = test {
     val q"class C(implicit ..$args)" = q"class C(implicit i: I, j: J)"
     val q"$imods val i: I" :: q"$jmods val j: J" :: Nil = args
     assert(imods.hasFlag(IMPLICIT))
@@ -165,7 +165,7 @@ trait ModsDeconstruction { self: QuasiquoteProperties =>
 
 trait ValVarDeconstruction { self: QuasiquoteProperties =>
   property("exhaustive val matcher") = test {
-    def matches(line: String) { val q"$mods val $name: $tpt = $rhs" = parse(line) }
+    def matches(line: String): Unit = { val q"$mods val $name: $tpt = $rhs" = parse(line) }
     matches("val x: Int")
     matches("val x: Int = 1")
     matches("lazy val x: Int = 1")
@@ -174,7 +174,7 @@ trait ValVarDeconstruction { self: QuasiquoteProperties =>
   }
 
   property("exhaustive var matcher") = test {
-    def matches(line: String) { val q"$mods var $name: $tpt = $rhs" = parse(line) }
+    def matches(line: String): Unit = { val q"$mods var $name: $tpt = $rhs" = parse(line) }
     matches("var x: Int")
     matches("var x: Int = 1")
     matches("var x = 1")
@@ -184,7 +184,7 @@ trait ValVarDeconstruction { self: QuasiquoteProperties =>
 
 trait PackageDeconstruction { self: QuasiquoteProperties =>
   property("exhaustive package matcher") = test {
-    def matches(line: String) { val q"package $name { ..$body }" = parse(line) }
+    def matches(line: String): Unit = { val q"package $name { ..$body }" = parse(line) }
     matches("package foo { }")
     matches("package foo { class C }")
     matches("package foo.bar { }")
@@ -193,7 +193,7 @@ trait PackageDeconstruction { self: QuasiquoteProperties =>
   }
 
   property("exhaustive package object matcher") = test {
-    def matches(line: String) {
+    def matches(line: String): Unit = {
       val q"package object $name extends { ..$early } with ..$parents { $self => ..$body }" = parse(line)
     }
     matches("package object foo")
@@ -232,7 +232,7 @@ trait DefDeconstruction { self: QuasiquoteProperties =>
     assert(impl.isEmpty)
   }
 
-  property("SI-8451") = test {
+  property("scala/bug#8451") = test {
     val q"def this(..$params) = this(..$args)" = q"def this(x: Int) = this(0)"
     assert(params ≈ List(q"${Modifiers(PARAM)} val x: Int"))
     assert(args ≈ List(q"0"))
@@ -247,7 +247,7 @@ trait ImportDeconstruction { self: QuasiquoteProperties =>
     matches("import foo.bar")
     matches("import foo.{bar, baz}")
     matches("import foo.{a => b, c => d}")
-    matches("import foo.{poision => _, _}")
+    matches("import foo.{position => _, _}")
     matches("import foo.bar.baz._")
   }
 

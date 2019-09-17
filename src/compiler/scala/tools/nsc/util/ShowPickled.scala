@@ -1,6 +1,13 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Martin Odersky
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala
@@ -26,10 +33,10 @@ object ShowPickled extends Names {
     }
     def readName =
       if (isName) new String(bytes, "UTF-8")
-      else sys.error("%s is no name" format tagName)
+      else throw new IllegalStateException(s"$tagName is no name")
     def nameIndex =
       if (hasName) readNat(bytes, 0)
-      else sys.error("%s has no name" format tagName)
+      else throw new IllegalStateException(s"$tagName has no name")
 
     def tagName = tag2string(tag)
     override def toString = "%d,%d: %s".format(num, startIndex, tagName)
@@ -89,6 +96,7 @@ object ShowPickled extends Names {
     case LITERALnull    => "LITERALnull"
     case LITERALclass   => "LITERALclass"
     case LITERALenum    => "LITERALenum"
+    case LITERALsymbol  => "LITERALsymbol"
     case SYMANNOT       => "SYMANNOT"
     case CHILDREN       => "CHILDREN"
     case ANNOTATEDtpe   => "ANNOTATEDtpe"
@@ -116,7 +124,7 @@ object ShowPickled extends Names {
     result.toInt
   }
 
-  def printFile(buf: PickleBuffer, out: PrintStream) {
+  def printFile(buf: PickleBuffer, out: PrintStream): Unit = {
     out.println("Version " + buf.readNat() + "." + buf.readNat())
     val index = buf.createIndex
     val entryList = makeEntryList(buf, index)
@@ -124,7 +132,7 @@ object ShowPickled extends Names {
 
     def p(s: String) = out print s
 
-    def printNameRef() {
+    def printNameRef(): Unit = {
       val idx = buf.readNat()
       val name = entryList nameAt idx
       val toPrint = " %s(%s)".format(idx, name)
@@ -142,7 +150,7 @@ object ShowPickled extends Names {
     def printConstAnnotArgRef() = printNat()
     def printAnnotArgRef() = printNat()
 
-    def printSymInfo(end: Int) {
+    def printSymInfo(end: Int): Unit = {
       printNameRef()
       printSymbolRef()
       val pflags = buf.readLongNat()
@@ -180,7 +188,7 @@ object ShowPickled extends Names {
      * interpreted are for the most part going to tell you the wrong thing.
      * It's not so easy to duplicate the logic applied in the UnPickler.
      */
-    def printEntry(i: Int) {
+    def printEntry(i: Int): Unit = {
       buf.readIndex = index(i)
       p(i + "," + buf.readIndex + ": ")
       val tag = buf.readByte()
@@ -210,17 +218,17 @@ object ShowPickled extends Names {
         case CONSTANTtpe =>
           printTypeRef(); printConstantRef()
         case TYPEREFtpe =>
-          printTypeRef(); printSymbolRef(); buf.until(end, printTypeRef)
+          printTypeRef(); printSymbolRef(); buf.until(end, () => printTypeRef())
         case TYPEBOUNDStpe =>
           printTypeRef(); printTypeRef()
         case REFINEDtpe =>
-          printSymbolRef(); buf.until(end, printTypeRef)
+          printSymbolRef(); buf.until(end, () => printTypeRef())
         case CLASSINFOtpe =>
-          printSymbolRef(); buf.until(end, printTypeRef)
+          printSymbolRef(); buf.until(end, () => printTypeRef())
         case METHODtpe | IMPLICITMETHODtpe =>
-          printTypeRef(); buf.until(end, printTypeRef)
+          printTypeRef(); buf.until(end, () => printTypeRef())
         case POLYtpe =>
-          printTypeRef(); buf.until(end, printSymbolRef)
+          printTypeRef(); buf.until(end, () => printSymbolRef())
         case LITERALboolean =>
           out.print(if (buf.readLong(len) == 0L) " false" else " true")
         case LITERALbyte    =>
@@ -239,6 +247,8 @@ object ShowPickled extends Names {
           out.print(" " + longBitsToDouble(buf.readLong(len)))
         case LITERALstring  =>
           printNameRef()
+        case LITERALsymbol  =>
+          printNameRef()
         case LITERALenum    =>
           printSymbolRef()
         case LITERALnull    =>
@@ -246,17 +256,17 @@ object ShowPickled extends Names {
         case LITERALclass   =>
           printTypeRef()
         case CHILDREN       =>
-          printSymbolRef(); buf.until(end, printSymbolRef)
+          printSymbolRef(); buf.until(end, () => printSymbolRef())
         case SYMANNOT       =>
-          printSymbolRef(); printTypeRef(); buf.until(end, printAnnotArgRef)
+          printSymbolRef(); printTypeRef(); buf.until(end, () => printAnnotArgRef())
         case ANNOTATEDtpe   =>
-          printTypeRef(); buf.until(end, printAnnotInfoRef)
+          printTypeRef(); buf.until(end, () => printAnnotInfoRef())
         case ANNOTINFO      =>
-          printTypeRef(); buf.until(end, printAnnotArgRef)
+          printTypeRef(); buf.until(end, () => printAnnotArgRef())
         case ANNOTARGARRAY  =>
-          buf.until(end, printConstAnnotArgRef)
+          buf.until(end, () => printConstAnnotArgRef())
         case EXISTENTIALtpe =>
-          printTypeRef(); buf.until(end, printSymbolRef)
+          printTypeRef(); buf.until(end, () => printSymbolRef())
 
         case _ =>
       }
@@ -284,7 +294,7 @@ object ShowPickled extends Names {
     pickle.readIndex = saved
   }
 
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
     args foreach { arg =>
       fromFile(arg) match {
         case Some(pb) => show(arg + ":", pb)

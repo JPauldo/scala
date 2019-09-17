@@ -1,4 +1,5 @@
-import scala.tools.nsc._  
+import scala.tools.nsc._
+import scala.tools.nsc.interpreter.shell.ReplReporterImpl
 
 object Test {
   
@@ -10,7 +11,7 @@ object Test {
   
     class xyz[A] extends annotation.TypeConstraint
     
-    def loopWhile[T](cond: =>Boolean)(body: =>(Unit @xyz[T])): Unit @ xyz[T] = {{
+    def loopWhile[T](cond: => Boolean)(body: => (Unit @xyz[T])): Unit @ xyz[T] = {{
       if (cond) {{
         body
         loopWhile[T](cond)(body)
@@ -27,10 +28,10 @@ object Test {
     
   """
   
-  def main(args: Array[String]) {
+  def main(args: Array[String]): Unit = {
     val settings = new Settings()
     settings.classpath.value = System.getProperty("java.class.path")
-    val tool = new interpreter.IMain(settings)
+    val tool = new interpreter.IMain(settings, new ReplReporterImpl(settings))
     val global = tool.global
 
     import global._

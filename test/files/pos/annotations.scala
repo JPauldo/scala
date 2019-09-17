@@ -1,8 +1,7 @@
 class ann(i: Int) extends scala.annotation.Annotation
-class cfann(x: String) extends annotation.ClassfileAnnotation
+class cfann(x: String) extends annotation.ConstantAnnotation
 
 // annotations on abstract types
-abstract class C1[@annotation.elidable(0) +T, U, V[_]]
 abstract class C2[@deprecated
                   @ann(1) T <: Number,
                   V]
@@ -46,7 +45,7 @@ object Test {
 class BeanPropertyTests {
   @scala.beans.BeanProperty lazy val lv1 = 0
 
-  def foo() {
+  def foo(): Unit = {
     val bp1 = new BeanPropertyTests1
 
     println(lv1)
@@ -70,7 +69,7 @@ class BeanPropertyTests1 {
 // test mixin of getters / setters, and implementing abstract
 // methods using @BeanProperty
 class C extends T with BeanF {
-  def foo() {
+  def foo(): Unit = {
     setF("doch!")
     setG(true)
     this.getF()
@@ -91,9 +90,9 @@ trait BeanF {
 }
 
 
-class Ann3(arr: Array[String]) extends annotation.ClassfileAnnotation
-class Ann4(i: Int) extends annotation.ClassfileAnnotation
-class Ann5(value: Class[_]) extends annotation.ClassfileAnnotation
+class Ann3(arr: Array[String]) extends annotation.ConstantAnnotation
+class Ann4(i: Int) extends annotation.ConstantAnnotation
+class Ann5(value: Class[_]) extends annotation.ConstantAnnotation
 
 object Test3 {
   final val i = 1083
@@ -103,8 +102,10 @@ object Test3 {
 class Test4 {
   @Ann3(arr = Array("dlkfj", "DSF"))
   @Ann4(i = 2908)
-  @Ann4(i = Test3.i)
   @Ann5(value = classOf[Int])
+  def foo: Unit = {}
+
+  @Ann4(i = Test3.i)
   @Ann5(Test3.cls)
-  def foo {}
+  def bar: Unit = {}
 }

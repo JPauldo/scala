@@ -23,6 +23,7 @@ chapter: 3
                       |  SimpleType ‘#’ id
                       |  StableId
                       |  Path ‘.’ ‘type’
+                      |  Literal
                       |  ‘(’ Types ‘)’
   TypeArgs          ::=  ‘[’ Types ‘]’
   Types             ::=  Type {‘,’ Type}
@@ -102,16 +103,39 @@ forms.
 ### Singleton Types
 
 ```ebnf
-SimpleType  ::=  Path ‘.’ type
+SimpleType  ::=  Path ‘.’ ‘type’
 ```
 
-A _singleton type_ is of the form $p.$`type`, where $p$ is a
-path pointing to a value expected to [conform](06-expressions.html#expression-typing)
-to `scala.AnyRef`. The type denotes the set of values
-consisting of `null` and the value denoted by $p$.
+A _singleton type_ is of the form $p.$`type`. Where $p$ is a path pointing to a
+value which [conforms](06-expressions.html#expression-typing) to
+`scala.AnyRef`, the type denotes the set of values consisting of `null` and the
+value denoted by $p$ (i.e., the value $v$ for which `v eq p`). Where the path
+does not conform to `scala.AnyRef` the type denotes the set consisting of only
+the value denoted by $p$.
 
-A _stable type_ is either a singleton type or a type which is
-declared to be a subtype of trait `scala.Singleton`.
+<!-- a pattern match/type test against a singleton type `p.type` desugars to `_ eq p` -->
+
+### Literal Types
+
+```ebnf
+SimpleType  ::=  Literal
+```
+
+A literal type `lit` is a special kind of singleton type which denotes the
+single literal value `lit`.  Thus, the type ascription `1: 1` gives the most
+precise type to the literal value `1`:  the literal type `1`.
+
+At run time, an expression `e` is considered to have literal type `lit` if `e ==
+lit`.  Concretely, the result of `e.isInstanceOf[lit]` and `e match { case _ :
+lit => }` is determined by evaluating `e == lit`.
+
+Literal types are available for all types for which there is dedicated syntax
+except `Unit`. This includes the numeric types (other than `Byte` and `Short`
+which don't currently have syntax), `Boolean`, `Char`, `String` and `Symbol`.
+
+### Stable Types
+A _stable type_ is a singleton type, a literal type,
+or a type that is declared to be a subtype of trait `scala.Singleton`.
 
 ### Type Projection
 
@@ -307,7 +331,7 @@ equivalent to `AnyRef` $\\{ R \\}$.
 
 ###### Example
 
-The following example shows how to declare and use a method which
+The following example shows how to declare and use a method which has
 a parameter type that contains a refinement with structural declarations.
 
 ```scala
@@ -387,7 +411,7 @@ Function types are shorthands for class types that define `apply`
 functions.  Specifically, the $n$-ary function type
 $(T_1 , \ldots , T_n) \Rightarrow U$ is a shorthand for the class type
 `Function$_n$[T1 , … , $T_n$, U]`. Such class
-types are defined in the Scala library for $n$ between 0 and 9 as follows.
+types are defined in the Scala library for $n$ between 0 and 22 as follows.
 
 ```scala
 package scala
@@ -483,7 +507,7 @@ is assumed. If an upper bound clause `<:$\,U$` is missing,
 existentially quantified type variable, where the existential quantification is
 implicit.
 
-A wildcard type must appear as type argument of a parameterized type.
+A wildcard type must appear as a type argument of a parameterized type.
 Let $T = p.c[\mathit{targs},T,\mathit{targs}']$ be a parameterized type where
 $\mathit{targs}, \mathit{targs}'$ may be empty and
 $T$ is a wildcard type `_$\;$>:$\,L\,$<:$\,U$`. Then $T$ is equivalent to the
@@ -507,7 +531,7 @@ Assume the class definitions
 
 ```scala
 class Ref[T]
-abstract class Outer { type T } .
+abstract class Outer { type T }
 ```
 
 Here are some examples of existential types:
@@ -530,7 +554,7 @@ Ref[_ <: java.lang.Number]
 The type `List[List[_]]` is equivalent to the existential type
 
 ```scala
-List[List[t] forSome { type t }] .
+List[List[t] forSome { type t }]
 ```
 
 ###### Example
@@ -829,7 +853,7 @@ The conformance relation $(<:)$ is the smallest transitive relation that satisfi
 - Conformance includes equivalence. If $T \equiv U$ then $T <: U$.
 - For every value type $T$, `scala.Nothing <: $T$ <: scala.Any`.
 - For every type constructor $T$ (with any number of type parameters), `scala.Nothing <: $T$ <: scala.Any`.
-- For every class type $T$ such that `$T$ <: scala.AnyRef` one has `scala.Null <: $T$`.
+- For every value type $T$, `scala.Null <: $T$` unless `$T$ <: scala.AnyVal`.
 - A type variable or abstract type $t$ conforms to its upper bound and
   its lower bound conforms to $t$.
 - A class type or parameterized type conforms to any of its base-types.

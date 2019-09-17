@@ -200,17 +200,11 @@ object scalac extends Command {
           "Calls to " & MItalic("@elidable") &
           " methods are omitted if method priority is lower than argument."),
         Definition(
-          CmdOption("Xexperimental"),
-          "Enable experimental extensions"),
-        Definition(
           CmdOption("Xfatal-warnings"),
           "Fail the compilation if there are any warnings."),
         Definition(
           CmdOption("Xfull-lubs"),
           "Retain pre 2.10 behavior of less aggressive truncation of least upper bounds."),
-        Definition(
-          CmdOption("Xfuture"),
-          "Turn on future language features."),
         Definition(
           CmdOption("Xgenerate-phase-graph", Argument("file")),
           "Generate the phase graphs (outputs .dot files) to fileX.dot."),
@@ -238,9 +232,6 @@ object scalac extends Command {
         Definition(
           CmdOption("Xmain-class", Argument("path")),
           "Class for manifest's Main-Class entry (only useful with -d <jar>)."),
-        Definition(
-          CmdOption("Xmax-classfile-name", Argument("n")),
-          "Maximum filename length for generated classes."),
         Definition(
           CmdOptionBound("Xmigration:", Argument("version")),
           "Warn about constructs whose behavior may have changed since" & Argument("version") & "."),
@@ -272,16 +263,16 @@ object scalac extends Command {
           CmdOption("Xpluginsdir", Argument("path")),
           "Path to search for plugin archives."),
         Definition(
-          CmdOptionBound("Xprint:", Argument("phases")),
+          CmdOptionBound("Vprint:", Argument("phases")),
           "Print out program after " & Argument("phases") & " (see below)."),
         Definition(
-          CmdOptionBound("Xprint-icode", "[:" & Argument("phases") & "]"),
+          CmdOptionBound("Vprint-icode", "[:" & Argument("phases") & "]"),
           "Log internal icode to *.icode files after" & Argument("phases") & " (default: icode)."),
         Definition(
-          CmdOption("Xprint-pos"),
+          CmdOption("Vprint-pos"),
           "Print tree positions, as offsets."),
         Definition(
-          CmdOption("Xprint-types"),
+          CmdOption("Vprint-types"),
           "Print tree types (debugging option)."),
         Definition(
           CmdOption("Xprompt"),
@@ -304,7 +295,7 @@ object scalac extends Command {
           "Print a synopsis of compiler phases."),
         Definition(
           CmdOptionBound("Xsource:", Argument("version")),
-          "Treat compiler input as Scala source for the specified version, see SI-8126."),
+          "Treat compiler input as Scala source for the specified version, see scala/bug#8126."),
         Definition(
           CmdOption("Xsource-reader", Argument("classname")),
           "Specify a custom method for reading source files."),

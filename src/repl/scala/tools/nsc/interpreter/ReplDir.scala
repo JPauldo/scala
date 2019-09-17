@@ -1,15 +1,24 @@
-/* NSC -- new Scala compiler
- * Copyright 2005-2013 LAMP/EPFL
- * @author  Paul Phillips
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc.
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 
 package scala.tools.nsc
 package interpreter
 
+import java.io.PrintWriter
+
 import io.VirtualDirectory
 import settings.MutableSettings
-import scala.reflect.io.{ AbstractFile, PlainDirectory, Directory }
-import scala.collection.generic.Clearable
+import scala.reflect.io.{AbstractFile, Directory, PlainDirectory}
+import scala.collection.mutable.Clearable
 
 /** Directory to save .class files to. */
 trait ReplDir extends AbstractFile with Clearable { }
@@ -35,8 +44,8 @@ class ReplOutput(val dirSetting: MutableSettings#StringSetting) {
   )
 
   // print the contents hierarchically
-  def show(out: JPrintWriter) = {
-    def pp(root: AbstractFile, indentLevel: Int) {
+  def show(out: PrintWriter) = {
+    def pp(root: AbstractFile, indentLevel: Int): Unit = {
       val label = root.name
       val spaces = "    " * indentLevel
       out.println(spaces + label)

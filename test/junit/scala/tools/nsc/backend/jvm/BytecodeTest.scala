@@ -6,20 +6,35 @@ import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
 
 import scala.tools.asm.Opcodes._
-import scala.tools.partest.ASMConverters._
-import scala.tools.testing.BytecodeTesting
-import scala.tools.testing.BytecodeTesting._
+import scala.tools.testkit.ASMConverters._
+import scala.tools.testkit.BytecodeTesting
+import scala.tools.testkit.BytecodeTesting._
+import scala.collection.JavaConverters._
+import scala.tools.asm.Opcodes
 
 @RunWith(classOf[JUnit4])
 class BytecodeTest extends BytecodeTesting {
   import compiler._
 
   @Test
+  def t10812(): Unit = {
+    val code =
+      """ A { def f: Object = null }
+        |object B extends A { override def f: String = "b" }
+      """.stripMargin
+    for (base <- List("trait", "class")) {
+      val List(a, bMirror, bModule) = compileClasses(base + code)
+      assertEquals(bMirror.name, "B")
+      assertEquals(bMirror.methods.asScala.filter(_.name == "f").map(m => m.name + m.desc).toList, List("f()Ljava/lang/String;"))
+    }
+  }
+
+  @Test
   def t6288bJumpPosition(): Unit = {
     val code =
       """object Case3 {                                 // 01
         | def unapply(z: Any): Option[Int] = Some(-1)   // 02
-        | def main(args: Array[String]) {               // 03
+        | def main(args: Array[String]): Unit = {       // 03
         |    ("": Any) match {                          // 04
         |      case x : String =>                       // 05
         |        println("case 0")                      // 06 println and jump at 6
@@ -194,5 +209,129 @@ class BytecodeTest extends BytecodeTesting {
     val m = compileMethod(code)
     val List(ExceptionHandler(_, _, _, desc)) = m.handlers
     assert(desc == None, desc)
+  }
+
+  @Test
+  def classesEndingInDollarHaveSignature(): Unit = {
+    // A name-based test in the backend prevented classes ending in $ from getting a Scala signature
+    val code = "class C$"
+    val c = compileClass(code)
+    assertEquals(c.attrs.asScala.toList.map(_.`type`).sorted, List("ScalaInlineInfo", "ScalaSig"))
+  }
+
+  @Test
+  def t10343(): Unit = {
+    val main = "class Main { Person() }"
+    val person = "case class Person(age: Int = 1)"
+
+    def check(code: String) = {
+      val List(_, _, pm) = compileClasses(code)
+      assertEquals(pm.name, "Person$")
+      assertEquals(pm.methods.asScala.map(_.name).toList,
+        // after typer, `"$lessinit$greater$default$1"` is next to `<init>`, but the constructor phase
+        // and code gen change module constructors around. the second `apply` is a bridge, created in erasure.
+        List("<clinit>", "$lessinit$greater$default$1", "toString", "apply", "apply$default$1", "unapply", "writeReplace", "apply", "<init>"))
+    }
+    check(s"$main\n$person")
+    check(s"$person\n$main")
+  }
+
+  @Test
+  def t11127(): Unit = {
+    val code =
+      """abstract class C {
+        |  def b: Boolean
+        |
+        |  // no need to lift the `try` to a separate method if it's in the receiver expression
+        |  def t1 = (try { Console } catch { case _: ClassCastException => Console }).println()
+        |
+        |  // no need to lift the `try`
+        |  def t2 = !(try b catch { case _: ClassCastException => b })
+        |
+        |  def t3 = b || (try b catch { case _: ClassCastException => b })
+        |
+        |  def t4 = (try b catch { case _: ClassCastException => b }) || b
+        |
+        |  def t5 = b && (try b catch { case _: ClassCastException => b })
+        |
+        |  def t6 = (try b catch { case _: ClassCastException => b }) && b
+        |
+        |  def t7 = (try b catch { case _: ClassCastException => b }) && b || b && (try b catch { case _: ClassCastException => b || (try b catch { case _: ClassCastException => b }) })
+        |}
+      """.stripMargin
+    val c = compileClass(code)
+    def check(m: String, invoked: List[String]) = {
+      val meth = getMethod(c, m)
+      assert(meth.handlers.nonEmpty, meth.handlers)
+      assertInvokedMethods(meth, invoked)
+    }
+    check("t1", List("scala/Console$.println"))
+    check("t2", List("C.b", "C.b"))
+    check("t3", List("C.b", "C.b", "C.b"))
+    check("t4", List("C.b", "C.b", "C.b"))
+    check("t5", List("C.b", "C.b", "C.b"))
+    check("t6", List("C.b", "C.b", "C.b"))
+    check("t7", List("C.b", "C.b", "C.b", "C.b", "C.b", "C.b", "C.b", "C.b"))
+  }
+
+  @Test
+  def t11412(): Unit = {
+    val code = "class A { val a = 0 }; class C extends A with App { val x = 1; val y = x }"
+    val cs = compileClasses(code)
+    val c = cs.find(_.name == "C").get
+    val fs = c.fields.asScala.toList.sortBy(_.name).map(f => (f.name, (f.access & Opcodes.ACC_FINAL) != 0))
+    assertEquals(List(
+      ("executionStart", false),
+      ("scala$App$$_args", false),
+      ("scala$App$$initCode", false),
+      ("x", false),
+      ("y", false)
+    ), fs)
+    val assignedInConstr = getMethod(c, "<init>").instructions.filter(_.opcode == Opcodes.PUTFIELD)
+    assertEquals(Nil, assignedInConstr)
+  }
+
+  @Test
+  def t11412b(): Unit = {
+    val code = "class C { def f = { var x = 0; val y = 1; class K extends App { def m = x + y } } }"
+    val cs = compileClasses(code)
+    val k = cs.find(_.name == "C$K$1").get
+    val fs = k.fields.asScala.toList.sortBy(_.name).map(f => (f.name, (f.access & Opcodes.ACC_FINAL) != 0))
+    assertEquals(List(
+      ("$outer", true),
+      ("executionStart", false),
+      ("scala$App$$_args", false),
+      ("scala$App$$initCode", false),
+      ("x$1", true), // captured, assigned in constructor
+      ("y$1", true)  // captured
+    ), fs)
+    val assignedInConstr = getMethod(k, "<init>").instructions.filter(_.opcode == Opcodes.PUTFIELD) map {
+      case f: Field => f.name
+    }
+    assertEquals(List("$outer", "x$1", "y$1"), assignedInConstr.sorted)
+  }
+
+  @Test
+  def t11641(): Unit = {
+    val code =
+      """class B { val b = 0 }
+        |class C extends DelayedInit {
+        |  def delayedInit(body: => Unit): Unit = ()
+        |}
+        |class D extends DelayedInit {
+        |  val d = 0
+        |  def delayedInit(body: => Unit): Unit = ()
+        |}
+        |class E extends C {
+        |  val e = 0
+        |}
+        |class F extends D
+      """.stripMargin
+    val cs = compileClasses(code, allowMessage = _.msg.contains("there were two deprecation warnings"))
+    assertDoesNotInvoke(getMethod(cs.find(_.name == "B").get, "<init>"), "releaseFence")
+    assertDoesNotInvoke(getMethod(cs.find(_.name == "C").get, "<init>"), "releaseFence")
+    assertInvoke(getMethod(cs.find(_.name == "D").get, "<init>"), "scala/runtime/Statics", "releaseFence")
+    assertInvoke(getMethod(cs.find(_.name == "E").get, "<init>"), "scala/runtime/Statics", "releaseFence")
+    assertDoesNotInvoke(getMethod(cs.find(_.name == "F").get, "<init>"), "releaseFence")
   }
 }
